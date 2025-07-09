@@ -1,0 +1,3 @@
+[submodule "kernel"]
+	path = linux
+	url = https://github.com/yiliangw/linux.git
