@@ -1,0 +1,13 @@
+[Unit]
+Description=Bring up all Open vSwitch bridges
+After=openvswitch-switch.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/setup-ovs-iface.sh
+Restart=on-failure
+RestartSec=5
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
