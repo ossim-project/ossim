@@ -1,0 +1,6 @@
+workload:
+  cirros:
+    iso_url: http://download.cirros-cloud.net/0.4.0/cirros-0.4.0-x86_64-disk.img
+  ubuntu:
+    iso_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    iso_cksum_url:  https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
