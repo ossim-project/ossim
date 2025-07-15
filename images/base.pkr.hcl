@@ -77,7 +77,7 @@ source "qemu" "disk" {
     ["-cpu", "host"],
     ["-drive", "file=${var.out_dir}/${var.out_name},if=virtio,index=0,media=disk,format=${var.disk_format}"],
     ["-drive", "file=${var.seedimg},if=virtio,index=1,media=disk,format=raw"],
-    ["-fsdev", "local,id=input_fsdev,path=${var.input_dir},security_model=none,readonly"],
+    ["-fsdev", "local,id=input_fsdev,path=${var.input_dir},security_model=none,readonly=on"],
 	  ["-device", "virtio-9p-pci,fsdev=input_fsdev,mount_tag=input_fsdev"],
     ["-boot", "c"]
   ]

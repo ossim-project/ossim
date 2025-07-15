@@ -1,4 +1,4 @@
-# Ossim: End-to-End Simulation with OS-Level Supports
+# Ossim: OS-Driven End-to-End Simulation
 
 ## Quick Start
 
@@ -12,13 +12,28 @@ Steps:
 
 1. Install dependencies:
 
-```sh
-make install-dependencies
-```
+    ```sh
+    make install-dependencies
+    ```
 
 2. Initialize submodules:
 
-```sh
-git submodule udpate --init --depth 1 linux
-git submodule update --init --recursive --depth 1 qemu
-```
+    ```sh
+    git submodule udpate --init --depth 1 linux
+    git submodule update --init --recursive --depth 1 qemu
+    ```
+
+## Developer Guide
+
+- Develop Linux kernel
+
+    ```sh
+    # Compile the kernel (optional)
+    make build-linux
+
+    # Prepare the disk image (optional)
+    make linuxdev-dimg
+
+    # Bootstrap the kernel on QEMU
+    make qemu-linuxdev
+    ```

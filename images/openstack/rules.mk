@@ -48,9 +48,9 @@ qemu-openstack-$(1): $(openstack_dimg_o)$(1)/disk.qcow2 $(openstack_vmlinux) $(o
 	-display none -serial mon:stdio
 endef
 
-.PHONY: qemu-cxl
-qemu-cxl: $(openstack_dimg_o)base/disk.qcow2 $(openstack_vmlinux) $(openstack_initrd)
-	$(qemu) -machine q35,cxl=on,accel=kvm -cpu host -smp 8 -m 12G \
+.PHONY: myqemu-cxl
+qemu-cxl: $(openstack_dimg_o)base/disk.qcow2 $(openstack_vmlinux) $(openstack_initrd) $(myqemu)
+	$(myqemu) -machine q35,cxl=on,accel=kvm -cpu host -smp 8 -m 12G \
 	-object memory-backend-ram,id=dram0,size=8G \
 	-object memory-backend-ram,id=vmem0,share=on,size=4G \
 	-numa node,nodeid=0,cpus=0-7,memdev=dram0 \

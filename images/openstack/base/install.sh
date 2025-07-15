@@ -16,7 +16,7 @@ apt-get update && apt-get install -y \
   linux-generic \
   ndctl
 
-mount -t 9p input_fsdev /mnt
+mount -t 9p -o trans=virtio,ro,cache=loose input_fsdev /mnt
 
 pushd /mnt
 
