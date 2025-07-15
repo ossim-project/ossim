@@ -37,8 +37,6 @@ endef
 help:
 	@echo "Hello Ossim!"
 
-$(eval $(call include_rules,$(d)images/rules.mk))
-
 .PHONY: all
 all: $(ALL_ALL)
 
@@ -46,9 +44,43 @@ all: $(ALL_ALL)
 clean: 
 	rm -rf $(CLEAN_ALL)
 
-.PHONY: clean-external
-clean-external: $(EXTERNAL_CLEAN_ALL)
+.PHONY: install-dependencies
+install-dependencies:
+	sudo apt-get update && sudo apt-get install -y \
+		libglib2.0-dev libfdt-dev libpixman-1-dev \
+		zlib1g-dev ninja-build
 
-$(o)%/ $(b)%/:
-	mkdir -p $@
+qemu_d := $(d)qemu/
+qemu_b := $(b)qemu/
+qemu_o := $(o)qemu/
+qemu := $(qemu_o)bin/qemu-system-x86_64
 
+$(qemu) := configure-qemu build-qemu
+
+.PHONY: configure-qemu
+configure-qemu:
+	@mkdir -p $(qemu_b)
+	@mkdir -p $(qemu_o)
+	cd $(qemu_b) && $(realpath $(qemu_d)configure) \
+		--prefix=$(realpath $(qemu_o)) \
+		--target-list=x86_64-softmmu \
+		--enable-numa \
+		--enable-slirp \
+		--enable-kvm
+
+$(qemu_b)Makefile: configure-qemu
+	@mkdir -p $(qemu_b)
+	cd $(qemu_b) && $(realpath $(qemu_d)configure) \
+		--prefix=$(realpath $(qemu_o)) \
+		--target-list=x86_64-softmmu
+
+.PHONY: build-qemu
+build-qemu: $(qemu_b)Makefile
+	$(MAKE) -C $(qemu_b) -j`nproc`
+	$(MAKE) -C $(qemu_b) install
+
+.PHONY: clean-qemu
+clean-qemu:
+	rm -rf $(qemu_b) $(qemu_o)
+
+$(eval $(call include_rules,$(d)images/rules.mk))
