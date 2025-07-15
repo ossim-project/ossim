@@ -8,13 +8,13 @@ usermod -aG sudo $USER
 usermod -aG disk $USER
 usermod -aG kvm $USER
 
-apt-get update
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Packages required for building the kernel
-apt-get install -y \
-  qemu-guest-agent
+apt-get update && apt-get install -y \
+  qemu-guest-agent \
+  linux-generic \
+  ndctl
 
 mount -t 9p input_fsdev /mnt
 

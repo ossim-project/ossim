@@ -48,8 +48,26 @@ qemu-openstack-$(1): $(openstack_dimg_o)$(1)/disk.qcow2 $(openstack_vmlinux) $(o
 	-display none -serial mon:stdio
 endef
 
-$(eval $(call qemu_openstack_rule,base))
-
+.PHONY: qemu-cxl
+qemu-cxl: $(openstack_dimg_o)base/disk.qcow2 $(openstack_vmlinux) $(openstack_initrd)
+	$(qemu) -machine q35,cxl=on,accel=kvm -cpu host -smp 8 -m 12G \
+	-object memory-backend-ram,id=dram0,size=8G \
+	-object memory-backend-ram,id=vmem0,share=on,size=4G \
+	-numa node,nodeid=0,cpus=0-7,memdev=dram0 \
+	-numa node,nodeid=1,memdev=vmem0 \
+	-kernel $(openstack_vmlinux) \
+	-append "$(openstack_kernel_cmdline)" \
+	-initrd $(openstack_initrd) \
+	-device virtio-blk-pci,drive=vd0,bus=pcie.0,addr=0x4 \
+	-drive file=$(word 1, $^),media=disk,format=qcow2,if=none,id=vd0 \
+	-netdev user,id=user-net \
+	-device virtio-net-pci,netdev=user-net \
+	-device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
+	-device cxl-rp,port=0,bus=cxl.1,id=root_port13,chassis=0,slot=2 \
+	-device cxl-type3,bus=root_port13,volatile-memdev=vmem0,id=cxl-vmem0 \
+	-M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G \
+	-boot c \
+	-display none -serial mon:stdio
 
 define openstack_disk_rules # $1: name, $2: disk (paths)
 .PHONY: ubuntu-$(1) clean-ubuntu-$(1)
