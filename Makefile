@@ -6,7 +6,7 @@ OSSIM_PREFIX ?= install/
 OSSIM_BUILD ?= build/
 OSSIM_OUTPUT ?= out/
 
-PREFIX := $(OSSIM_PREFIX)
+PREFIX := $(abspath $(OSSIM_PREFIX))
 BUILD := $(OSSIM_BUILD)
 OUTPUT := $(OSSIM_OUTPUT)
 
@@ -22,7 +22,10 @@ install-dependencies:
   		libssl-dev libelf-dev bc dwarves \
 		guestfish cloud-image-utils \
 		libfuse3-dev libcap-ng-dev \
-		lld
+		lld \
+		meson ninja-build \
+		xsltproc libxslt1-dev libgnutls28-dev \
+		python3-docutils libjson-c-dev
 
 clean: 
 	rm -rf $(CLEAN_ALL)
@@ -31,6 +34,7 @@ clean:
 qemu := qemu-system-x86_64
 
 include make/qemu.mk
+include make/libvirt.mk
 include make/linux.mk
 
 $(eval $(call include_rules,$(d)images/rules.mk))

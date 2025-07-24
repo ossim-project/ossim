@@ -55,7 +55,7 @@ $(linuxdev_config): $(o)base/disk.qcow2
 
 .PHONY: qemu-linuxdev
 qemu-linuxdev: $(linuxdev_dimg) $(linux_vmlinux)
-	$(qemu) -machine q35,accel=kvm -cpu host -smp 8 -m 16G \
+	$(qemu) -machine q35,accel=kvm -cpu host -smp 8 -m 32G \
 	-kernel $(linux_vmlinux) \
 	-append "$(LINUXDEV_KERNEL_CMDLINE)" \
 	-drive file=$(linuxdev_dimg),media=disk,format=qcow2,if=virtio,index=0 \

@@ -16,7 +16,15 @@ Steps:
     make install-dependencies
     ```
 
-2. Initialize submodules:
+2. Add the current user to related groups and relogin:
+
+    ```sh
+    sudo adduser $USER kvm
+    sudo adduser $USER libvirt
+    exit
+    ```
+
+3. Initialize submodules:
 
     ```sh
     git submodule udpate --init --depth 1 linux
