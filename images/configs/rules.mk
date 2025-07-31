@@ -1,4 +1,4 @@
-yq := yq
+yq ?= yq
 
 platform_config_deps := $(b)platform.sed $(d)platform.yaml
 openstack_config_deps :=  $(b)openstack.sed $(d)openstack.yaml

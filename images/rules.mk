@@ -35,5 +35,6 @@ $(packer_zip):
 
 linux_dir := $(project_root)linux/
 
+$(eval $(call include_rules,$(d)dev/rules.mk))
 $(eval $(call include_rules,$(d)linuxdev/rules.mk))
 $(eval $(call include_rules,$(d)openstack/rules.mk))

@@ -64,8 +64,8 @@ qemu-linuxdev: $(linuxdev_dimg) $(linux_vmlinux)
 	-boot c \
 	-display none -serial mon:stdio
 
-.PHONY: configure-linux
-configure-linux: $(linuxdev_config)
+.PHONY: configure-linux-qemu
+configure-linux-qemu: $(linuxdev_config)
 	@mkdir -p $(linux_b)
 	cp $< $(linux_b).config
 	$(linux_d)scripts/config \

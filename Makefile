@@ -12,6 +12,8 @@ OUTPUT := $(OSSIM_OUTPUT)
 
 include make/include.mk
 
+yq := $(PREFIX)yq
+
 .PHONY: install-dependencies
 install-dependencies:
 	sudo apt-get update && sudo apt-get install -y \
@@ -26,6 +28,9 @@ install-dependencies:
 		meson ninja-build \
 		xsltproc libxslt1-dev libgnutls28-dev \
 		python3-docutils libjson-c-dev
+	mkdir `dirname $(yq)` && \
+	wget -qO $(yq) https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && \
+	chmod a+x $(yq)
 
 clean: 
 	rm -rf $(CLEAN_ALL)
