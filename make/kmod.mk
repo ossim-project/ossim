@@ -12,6 +12,7 @@ clean-kmod:
 
 .PHONY: load-kmod
 load-kmod: $(kmod_b)ossim.ko
+	@if lsmod | grep -q '^ossim'; then sudo rmmod ossim; fi 
 	sudo insmod $<
 	sudo dmesg | tail -n 10
 
@@ -22,6 +23,15 @@ unload-kmod:
 
 .PHONY: reload-kmod
 reload-kmod: unload-kmod load-kmod
+
+.PHONY: test-kmod
+test-kmod: $(kmod_b)test/ioctl
+	$(kmod_b)test/ioctl
+	sudo dmesg | tail -n 10
+
+$(kmod_b)test/ioctl: $(kmod_d)test/ioctl.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -o $@ $< -I$(kmod_d)include -L$(kmod_b)
 
 $(kmod_b)ossim.ko:
 	$(MAKE) build-kmod
