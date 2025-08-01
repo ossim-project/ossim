@@ -1,4 +1,4 @@
-LINUX_TARGET := vmlinux
+LINUX_TARGET := 
 
 linux_d := $(d)linux/
 linux_b := $(b)linux/
@@ -24,7 +24,7 @@ configure-linux-local:
 	cp /boot/config-`uname -r` $(linux_b).config
 	$(linux_d)scripts/config \
 		--file $(linux_b).config \
-		--disable CONFIG_MODULES \
+		--disable CONFIG_DEBUG_INFO_BTF \
 		--disable CONFIG_MODULE_SIG \
 		--disable CONFIG_MODULE_SIG_ALL \
 		--set-str CONFIG_SYSTEM_TRUSTED_KEYS "" \
@@ -67,6 +67,11 @@ configure-linux-local:
 build-linux: $(linux_b).config
 	$(MAKE) LD=ld.lld -C $(linux_b) -j`nproc` $(LINUX_TARGET)
 
+.PHONY: install-linux
+install-linux: $(linux_b)vmlinux
+	sudo $(MAKE) -C $(linux_b) modules_install install
+
 .PHONY: clean-linux
 clean-linux:
 	rm -rf $(linux_b) $(linux_o)
+
