@@ -27,8 +27,9 @@ install-dependencies:
 		lld \
 		meson ninja-build \
 		xsltproc libxslt1-dev libgnutls28-dev \
-		python3-docutils libjson-c-dev
-	mkdir `dirname $(yq)` && \
+		python3-docutils libjson-c-dev \
+		libslirp-dev
+	mkdir -p `dirname $(yq)` && \
 	wget -qO $(yq) https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && \
 	chmod a+x $(yq)
 
@@ -43,5 +44,5 @@ include make/libvirt.mk
 include make/linux.mk
 include make/kmod.mk
 
+$(eval $(call include_rules,$(d)utils/rules.mk))
 $(eval $(call include_rules,$(d)images/rules.mk))
-

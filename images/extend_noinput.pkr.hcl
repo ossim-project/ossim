@@ -34,10 +34,6 @@ variable "out_name" {
   type    = string
 }
 
-variable "input_dir" {
-  type    = string
-}
-
 variable "install_script" {
   type    = string
 }
@@ -75,8 +71,6 @@ source "qemu" "disk" {
     ["-enable-kvm"],
     ["-cpu", "host"],
     ["-drive", "file=${var.out_dir}/${var.out_name},if=ide,index=0,media=disk,format=qcow2"],
-    ["-fsdev", "local,id=input_fsdev,path=${var.input_dir},security_model=none,readonly=on"],
-	  ["-device", "virtio-9p-pci,fsdev=input_fsdev,mount_tag=input_fsdev"],
     ["-boot", "c"],
   ]
   shutdown_command = "sudo shutdown -P now"
