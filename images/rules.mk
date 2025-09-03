@@ -6,7 +6,7 @@ PACKER_ZIP_URL := https://releases.hashicorp.com/packer/$(PACKER_VERSION)/packer
 IMAGE_BUILD_CPUS := $(shell echo $$((`nproc` / 4 * 3)))
 IMAGE_BUILD_MEMORY := $(shell echo $$((`free -m | awk '/^Mem:/ {print $$4}'` / 4 * 3)))
 
-qemu := qemu-system-x86_64
+qemu := /bin/qemu-system-x86_64
 virt_copy_out := virt-copy-out
 
 QEMU_IMG := qemu-img
@@ -18,6 +18,7 @@ packer_zip := $(b)packer.zip
 
 base_hcl := $(d)base.pkr.hcl
 extend_hcl := $(d)extend.pkr.hcl
+extend_noinput_hcl := $(d)extend_noinput.pkr.hcl
 
 
 %disk.raw: %disk.qcow2
@@ -38,3 +39,4 @@ linux_dir := $(project_root)linux/
 $(eval $(call include_rules,$(d)dev/rules.mk))
 $(eval $(call include_rules,$(d)linuxdev/rules.mk))
 $(eval $(call include_rules,$(d)openstack/rules.mk))
+$(eval $(call include_rules,$(d)bigdata/rules.mk))
