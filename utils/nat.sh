@@ -28,9 +28,9 @@ case $1 in
     for ((i=0; i<${#filter_rules[@]}; i++)); do
       sudo iptables -t filter -D ${filter_rules[i]} || true
     done
-    # for ((i=0; i<${#nat_rules[@]}; i++)); do
-    #   sudo iptables -t nat -D ${nat_rules[i]} || true
-    # done
+    for ((i=0; i<${#nat_rules[@]}; i++)); do
+      sudo iptables -t nat -D ${nat_rules[i]} || true
+    done
     ;;
   *)
     echo "Usage: $0 setup|cleanup"

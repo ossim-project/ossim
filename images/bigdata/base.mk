@@ -1,7 +1,5 @@
-.PHONY: bigdata-base-dimg
-bigdata-base-dimg: $(bigdata_dimg_o)base/disk.qcow2
-
-$(bigdata_dimg_o)base/disk.qcow2: $(d)input $(b)seed.raw $(d)install.sh $(platform_config_deps) $(base_hcl) $(packer)
+.PRECIOUS: $(bigdata_dimg_o)install/base/disk.qcow2
+$(bigdata_dimg_o)install/base/disk.qcow2: $(d)input $(b)seed.raw $(d)install_base.sh $(platform_config_deps) $(base_hcl) $(packer)
 	rm -rf $(@D)
 	$(packer_run) build \
 	-var "disk_size=40G" \
@@ -25,6 +23,3 @@ $(b)seed.raw: $(d)user-data $(b)meta-data
 $(b)meta-data:
 	@mkdir -p $(@D)
 	tee $@ < /dev/null > /dev/null
-
-$(d)input/: $(addprefix $(d)input/ssh/, id_rsa id_rsa.pub config)
-	touch $@
