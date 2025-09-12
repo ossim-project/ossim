@@ -1,4 +1,6 @@
-set -eux
+set -exo pipefail
+
+source /etc/profile
 
 if sudo growpart /dev/sda 1; then
   sudo resize2fs /dev/sda1

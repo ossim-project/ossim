@@ -58,11 +58,13 @@ $(eval disk := $(1))
 $(eval mac := $(2))
 
 .PHONY: qemu-bigdata/$(disk)
-qemu-bigdata/$(disk): $(bigdata_dimg_o)$(disk)/disk.qcow2
+qemu-bigdata/$(disk): $(bigdata_dimg_o)$(disk)/disk.qcow2 $(d)input/
 	sudo -E $(myqemu) -machine q35,accel=kvm -cpu host -smp 8 -m 16G \
 	-drive file=$$<,media=disk,format=qcow2,if=virtio,index=0 \
 	-netdev bridge,id=net-management,br=$$(MANAGEMENT_BRIDGE) \
 	-device virtio-net-pci,netdev=net-management,mac=$(mac) \
+    -fsdev local,id=input_fsdev,path=$$(word 2,$$^),security_model=none,readonly=on \
+	-device virtio-9p-pci,fsdev=input_fsdev,mount_tag=input_fsdev \
 	-boot c \
 	-display none -serial mon:stdio
 endef
@@ -71,12 +73,11 @@ $(eval $(call include_rules,$(d)base.mk))
 
 $(eval $(call bigdata_disk_extend_rule,base,install/base,$(d)config_base.sh,$(d)input/))
 
-$(eval $(call bigdata_disk_extend_rule,install/controller,base,$(d)install_controller.sh,))
-$(eval $(call bigdata_disk_extend_rule,config/controller,install/controller,$(d)config_controller.sh,$(d)input/))
+$(eval $(call bigdata_disk_extend_rule,config/controller,base,$(d)config_controller.sh,$(d)input/))
 $(eval $(call bigdata_disk_flatten_rule,controller,config/controller))
 $(eval $(call bigdata_disk_run_rule,controller,$(call conffget,host,.qemu_mac_list[0])))
 
-$(eval $(call bigdata_disk_extend_rule,install/worker,base,$(d)install_worker.sh,))
+$(eval $(call bigdata_disk_extend_rule,install/worker,base,$(d)config_worker.sh,$(d)input))
 
 $(eval $(call bigdata_disk_extend_rule,config/worker1,install/worker,$(d)config_worker1.sh,$(d)input/))
 $(eval $(call bigdata_disk_flatten_rule,worker1,config/worker1))
