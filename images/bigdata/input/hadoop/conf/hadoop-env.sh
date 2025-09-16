@@ -51,7 +51,6 @@
 
 # The java implementation to use. By default, this environment
 # variable is REQUIRED on ALL platforms except OS X!
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
 # The language environment in which Hadoop runs. Use the English
 # environment to ensure that logs are printed as expected.
@@ -60,7 +59,6 @@ export LANG=en_US.UTF-8
 # Location of Hadoop.  By default, Hadoop will attempt to determine
 # this location based upon its execution path.
 # export HADOOP_HOME=
-export HADOOP_HOME=/opt/hadoop
 
 # Location of Hadoop's configuration information.  i.e., where this
 # file is living. If this is not defined, Hadoop will attempt to
@@ -434,3 +432,10 @@ export HADOOP_LOG_DIR=/var/log/hadoop
 # By default, Hadoop uses jsvc which needs to know to launch a
 # server jvm.
 # export HADOOP_REGISTRYDNS_SECURE_EXTRA_OPTS="-jvm server"
+
+HADOOP_USER=ossim
+
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export HADOOP_HOME=/opt/hadoop
+export HADOOP_NAMENODE_USER=$HADOOP_USER
+export HADOOP_DATANODE_USER=$HADOOP_USER

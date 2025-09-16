@@ -86,3 +86,8 @@ $(eval $(call bigdata_disk_run_rule,worker1,$(call conffget,host,.qemu_mac_list[
 $(eval $(call bigdata_disk_extend_rule,config/worker2,install/worker,$(d)config_worker2.sh,$(d)input/))
 $(eval $(call bigdata_disk_flatten_rule,worker2,config/worker2))
 $(eval $(call bigdata_disk_run_rule,worker2,$(call conffget,host,.qemu_mac_list[1])))
+
+BIGDATA_DIMGS := controller worker1 worker2
+
+.PHONY: bigdata_dimgs
+bigdata_dimgs: $(addprefix $(bigdata_dimg_o),$(BIGDATA_DIMGS)$)
