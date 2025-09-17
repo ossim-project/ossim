@@ -12,12 +12,20 @@ OUTPUT := $(OSSIM_OUTPUT)
 
 include make/include.mk
 
+BPF_DEPS := 
 yq := $(PREFIX)yq
 
-.PHONY: install-dependencies
-install-dependencies:
+.PHONY: install-bpf-deps
+install-bpf-deps:
 	sudo apt-get update && sudo apt-get install -y \
-		git qemu-system-x86 \
+		libbpf-dev build-essential cmake \
+		clang llvm pkg-config libelf-dev \
+		protobuf-compiler libseccomp-dev
+
+.PHONY: install-deps
+install-deps:
+	sudo apt-get update && sudo apt-get install -y \
+		build-essential git qemu-system-x86 \
 		libglib2.0-dev libfdt-dev libpixman-1-dev \
 		zlib1g-dev ninja-build bear \
 		build-essential libncurses-dev bison flex \
@@ -43,6 +51,7 @@ include make/qemu.mk
 include make/libvirt.mk
 include make/linux.mk
 include make/kmod.mk
+include make/sched.mk
 
 $(eval $(call include_rules,$(d)utils/rules.mk))
 $(eval $(call include_rules,$(d)images/rules.mk))
