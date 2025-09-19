@@ -12,4 +12,8 @@ hostnamectl set-hostname $HOSTNAME
 install -m 600 netplan/${HOSTNAME}.yaml /etc/netplan/99-netplan-config.yaml
 netplan apply
 
-# Set up Hadoop
+export DEBIAN_FRONTEND=noninteractive
+apt-get update && apt-get install -y \
+  python3-pip \
+
+pip3 install --break-system-packages pyspark
