@@ -89,5 +89,5 @@ $(eval $(call bigdata_disk_run_rule,worker2,$(call conffget,host,.qemu_mac_list[
 
 BIGDATA_DIMGS := controller worker1 worker2
 
-.PHONY: bigdata_dimgs
-bigdata_dimgs: $(addprefix $(bigdata_dimg_o),$(BIGDATA_DIMGS)$)
+.PHONY: bigdata-dimgs
+bigdata-dimgs: $(addprefix $(bigdata_dimg_o),$(BIGDATA_DIMGS))

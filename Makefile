@@ -12,8 +12,7 @@ OUTPUT := $(OSSIM_OUTPUT)
 
 include make/include.mk
 
-BPF_DEPS := 
-yq := $(PREFIX)yq
+yq := $(PREFIX)bin/yq
 
 .PHONY: install-bpf-deps
 install-bpf-deps:

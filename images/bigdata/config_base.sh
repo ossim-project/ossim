@@ -6,6 +6,7 @@ mount -t 9p -o trans=virtio,ro,cache=loose input_fsdev /mnt
 pushd /mnt
 
 install -m 644 env.sh /etc/profile.d/ossim_env.sh
+install -m 755 scripts/mount_input_fs.sh /usr/loca/bin/mount_input_fs.sh
 source env.sh
 
 sudo tee /etc/hosts < hosts > /dev/null
