@@ -21,6 +21,6 @@ make OS=LINUX -j`nproc`
 rm -rf $TMP_DIR && mkdir -p $TMP_DIR
 ./dsdgen -SCALE $SCALE -DIR $TMP_DIR -FORCE
 
-hdfs dfs -rm -r $HDFS_DIR
+hdfs dfs -rm -r $HDFS_DIR || true
 hdfs dfs -mkdir -p $HDFS_DIR
 hdfs dfs -put -f $TMP_DIR/*.dat $HDFS_DIR

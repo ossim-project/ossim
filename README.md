@@ -35,7 +35,7 @@ Steps:
 3. Initialize submodules:
 
     ```sh
-    git submodule udpate --init --depth 1 linux
+    git submodule update --init --depth 1 linux
     git submodule update --init --recursive --depth 1 qemu
     ```
 
