@@ -1,4 +1,6 @@
-# Ossim: OS-Driven End-to-End Simulation
+# Ossim: OS-Level Support for Fast End-to-End Compute Cluster Evaluation
+
+Please check `docs/ossim.pdf` for an overview of the project's vision. 
 
 ## Set Up
 
