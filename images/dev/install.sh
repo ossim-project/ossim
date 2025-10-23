@@ -2,7 +2,8 @@ set -eux
 
 cat > /usr/local/bin/mount_virtiofs <<EOF
 #!/bin/bash
-mount -t virtiofs share_fsdev /mnt
+sudo mkdir -p /workspace
+mount -t virtiofs share_fsdev /workspace
 EOF
 chmod a+x /usr/local/bin/mount_virtiofs
 
