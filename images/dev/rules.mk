@@ -7,6 +7,8 @@ DEV_VM_MEMORY := 64G
 DEV_VM_SSH_PORT := 12222
 DEV_VM_VIRTIOFS_SOCK := /tmp/ossim_dev_virtiofs.sock
 
+DEV_VM_MOUNT_DIR := $(abspath ../$(project_root))
+
 dev_dimg := $(o)dev/disk.qcow2
 
 .PHONY: dev-dimg
@@ -55,7 +57,7 @@ virtiofs-dev:
 	rm -f $(DEV_VM_VIRTIOFS_SOCK)
 	/usr/libexec/virtiofsd \
 		--socket-path=$(DEV_VM_VIRTIOFS_SOCK) \
-		--shared-dir $(abspath $(project_root)) \
+		--shared-dir $(DEV_VM_MOUNT_DIR) \
 		--cache always \
 		--sandbox none \
 		--log-level debug
