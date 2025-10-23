@@ -21,8 +21,7 @@ Steps:
 1. Install dependencies:
 
     ```sh
-    sudo apt-get update && sudo apt-get install -y make
-    make install-deps
+    bash scripts/install_ubuntu_deps.sh
     ```
 
 2. Add the current user to related groups and relogin:
