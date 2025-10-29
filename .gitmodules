@@ -1,6 +1,3 @@
-[submodule "kernel"]
-	path = linux
-	url = https://github.com/ossim-project/linux.git
 [submodule "qemu"]
 	path = qemu
 	url = https://github.com/ossim-project/qemu.git
