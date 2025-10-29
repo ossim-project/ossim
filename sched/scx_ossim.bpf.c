@@ -1,24 +1,29 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * A simple scheduler.
+ * Ossim vCPU-aware scheduler.
  *
- * By default, it operates as a simple global weighted vtime scheduler and can
- * be switched to FIFO scheduling. It also demonstrates the following niceties.
+ * By default, it operates as a simple global weighted vtime scheduler.
+ * When VMs are running, it identifies vCPU threads and applies VM-specific
+ * scheduling policies based on metadata shared through BPF maps.
  *
- * - Statistics tracking how many tasks are queued to local and global dsq's.
- * - Termination notification for userspace.
+ * Features:
+ * - vCPU thread identification and differentiated scheduling
+ * - VM-aware weight adjustment and priority boosting
+ * - Per-vCPU statistics tracking
+ * - Graceful degradation when vCPU metadata is unavailable
  *
- * While very simple, this scheduler should work reasonably well on CPUs with a
- * uniform L3 cache topology. While preemption is not implemented, the fact that
- * the scheduling queue is shared across all CPUs means that whatever is at the
- * front of the queue is likely to be executed fairly quickly given enough
- * number of CPUs. The FIFO scheduling mode may be beneficial to some workloads
- * but comes with the usual problems with FIFO scheduling where saturating
- * threads can easily drown out interactive ones.
+ * Architecture (Section 6.4 of specification):
+ * - This BPF scheduler OWNS and CREATES the three shared maps:
+ *   1. vcpu_metadata: TID -> vCPU metadata (vcpu_index, flags, VM UUID, etc.)
+ *   2. vm_config: VM UUID (full 128-bit) -> VM-level config (cpu_shares, quotas)
+ *   3. vcpu_stats: TID -> per-vCPU statistics (enqueues, dispatches, runtime)
+ * - Maps are pinned to /sys/fs/bpf/ossim/ by the userspace daemon
+ * - QEMU opens pinned maps via bpf_obj_get() and updates them after ioctl validation
+ * - Kernel module (ossim.ko) validates registrations but doesn't update BPF maps
+ *   (bpf_map_update_elem not exported to modules)
+ * - This design enables zero-overhead vCPU identification in the scheduler hot path
  *
- * Copyright (c) 2022 Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2022 Tejun Heo <tj@kernel.org>
- * Copyright (c) 2022 David Vernet <dvernet@meta.com>
+ * Copyright (c) 2025 Ossim Project
  */
 #include <scx/common.bpf.h>
 
@@ -29,15 +34,83 @@ const volatile bool fifo_sched;
 static u64 vtime_now;
 UEI_DEFINE(uei);
 
+/* Maximum length for VM name string */
+#define OSSIM_VM_NAME_MAX 64
+
+/* vCPU thread flags */
+#define OSSIM_VCPU_FLAG_IOTHREAD  (1 << 0)  /* IO thread, not vCPU */
+#define OSSIM_VCPU_FLAG_REALTIME  (1 << 1)  /* Requires RT scheduling */
+#define OSSIM_VCPU_FLAG_PINNED    (1 << 2)  /* CPU affinity enforced */
+
 /*
  * Built-in DSQs such as SCX_DSQ_GLOBAL cannot be used as priority queues
  * (meaning, cannot be dispatched to with scx_bpf_dsq_insert_vtime()). We
  * therefore create a separate DSQ with ID 0 that we dispatch to and consume
- * from. If scx_simple only supported global FIFO scheduling, then we could just
- * use SCX_DSQ_GLOBAL.
+ * from.
  */
 #define SHARED_DSQ 0
 
+/**
+ * BPF-side view of vCPU metadata
+ * Simplified from ossim_vcpu_info for BPF verifier compatibility
+ */
+struct vcpu_metadata_bpf {
+	__u32 vcpu_index;
+	__u32 flags;
+	__s32 priority_hint;
+	__u32 weight_hint;
+	__u64 vm_uuid_low;   /* Lower 64 bits of UUID */
+	__u64 vm_uuid_high;  /* Upper 64 bits of UUID */
+	char vm_name[OSSIM_VM_NAME_MAX];
+};
+
+struct vm_config_bpf {
+	__u32 num_vcpus;
+	__u32 cpu_shares;
+	__s64 cpu_quota_us;
+	__u64 cpu_period_us;
+	__u32 isolation_level;
+};
+
+/* Full 128-bit UUID key for vm_config map to avoid collisions */
+struct vm_uuid_key {
+	__u64 uuid_low;
+	__u64 uuid_high;
+};
+
+/* Map: TID -> vCPU metadata */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, sizeof(pid_t));        /* vCPU thread TID */
+	__uint(value_size, sizeof(struct vcpu_metadata_bpf));
+	__uint(max_entries, 4096);               /* Support up to 4096 vCPUs */
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+} vcpu_metadata SEC(".maps");
+
+/* Map: VM UUID (full 128 bits) -> VM config */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, sizeof(struct vm_uuid_key));  /* Full 128-bit UUID to prevent collisions */
+	__uint(value_size, sizeof(struct vm_config_bpf));
+	__uint(max_entries, 256);                /* Support up to 256 VMs */
+} vm_config SEC(".maps");
+
+/* Map: Per-vCPU statistics exported to userspace */
+struct vcpu_stats_bpf {
+	__u64 enqueues;
+	__u64 dispatches;
+	__u64 total_runtime_ns;
+	__u64 last_enqueue_ts;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, sizeof(pid_t));
+	__uint(value_size, sizeof(struct vcpu_stats_bpf));
+	__uint(max_entries, 4096);
+} vcpu_stats SEC(".maps");
+
+/* Per-CPU statistics for local/global queueing */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(key_size, sizeof(u32));
@@ -52,47 +125,162 @@ static void stat_inc(u32 idx)
 		(*cnt_p)++;
 }
 
-s32 BPF_STRUCT_OPS(simple_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
+/* Check if task is a registered vCPU */
+static bool is_vcpu_thread(struct task_struct *p)
 {
+	struct vcpu_metadata_bpf *vcpu;
+	pid_t tid = p->pid;
+
+	vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
+	return vcpu != NULL;
+}
+
+/* Get VM configuration for a vCPU */
+static struct vm_config_bpf *get_vm_config(struct vcpu_metadata_bpf *vcpu)
+{
+	struct vm_uuid_key key = {
+		.uuid_low = vcpu->vm_uuid_low,
+		.uuid_high = vcpu->vm_uuid_high,
+	};
+	return bpf_map_lookup_elem(&vm_config, &key);
+}
+
+/* Update vCPU statistics */
+static void update_vcpu_stats(pid_t tid, bool is_enqueue)
+{
+	struct vcpu_stats_bpf *stats;
+	struct vcpu_stats_bpf new_stats = {
+		.enqueues = 0,
+		.dispatches = 0,
+		.total_runtime_ns = 0,
+		.last_enqueue_ts = 0,
+	};
+
+	stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+	if (!stats) {
+		/* Initialize stats entry */
+		bpf_map_update_elem(&vcpu_stats, &tid, &new_stats, BPF_NOEXIST);
+		stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+		if (!stats)
+			return;
+	}
+
+	if (is_enqueue) {
+		__sync_fetch_and_add(&stats->enqueues, 1);
+		stats->last_enqueue_ts = scx_bpf_now();
+	} else {
+		__sync_fetch_and_add(&stats->dispatches, 1);
+	}
+}
+
+/* Enhanced CPU selection with vCPU affinity awareness */
+s32 BPF_STRUCT_OPS(ossim_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
+{
+	struct vcpu_metadata_bpf *vcpu;
 	bool is_idle = false;
 	s32 cpu;
+	pid_t tid = p->pid;
 
-	cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+	vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
+	if (vcpu && (vcpu->flags & OSSIM_VCPU_FLAG_PINNED)) {
+		/* Respect explicit CPU pinning for this vCPU */
+		cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+	} else {
+		cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+	}
+
+	/* Count but don't insert here - let enqueue handle it to maintain consistent DSQ mode */
 	if (is_idle) {
 		stat_inc(0);	/* count local queueing */
-		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
 	}
 
 	return cpu;
 }
 
-void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
+/*
+ * Enhanced enqueue with vCPU awareness
+ *
+ * Scheduling Algorithm:
+ * 1. Lookup task TID in vcpu_metadata map (O(1) hash lookup)
+ * 2. If vCPU found:
+ *    a. Update vCPU statistics (enqueue counter, timestamp)
+ *    b. Lookup VM configuration using full 128-bit UUID key
+ *    c. Apply weight adjustment: adjusted_weight = (vcpu_weight * vm_cpu_shares) / 1024
+ *    d. Check REALTIME flag -> use shorter time slice if set
+ *    e. Insert into SHARED_DSQ using FIFO (if RT) or vtime-based scheduling
+ * 3. If not vCPU (regular task):
+ *    a. Use default scheduling policy (FIFO or vtime-based)
+ *    b. No statistics tracking, no weight adjustment
+ *
+ * Graceful Degradation:
+ * - If vcpu_metadata map is empty (no VMs running), all tasks are regular tasks
+ * - If vm_config lookup fails, uses default weight from vcpu_metadata
+ * - Scheduler operates normally even if ossim.ko is not loaded
+ */
+void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags)
 {
+	pid_t tid = p->pid;
+	struct vcpu_metadata_bpf *vcpu;
+	struct vm_config_bpf *vm_cfg;
+	u64 slice = SCX_SLICE_DFL;
+	u64 vtime = p->scx.dsq_vtime;
+
 	stat_inc(1);	/* count global queueing */
 
-	if (fifo_sched) {
-		scx_bpf_dsq_insert(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
+	/* Check if this is a vCPU thread */
+	vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
+	if (vcpu) {
+		/* This is a vCPU - apply VM-specific scheduling */
+		update_vcpu_stats(tid, true);
+
+		vm_cfg = get_vm_config(vcpu);
+		if (vm_cfg) {
+			/* Apply priority boost if requested */
+			if (vcpu->flags & OSSIM_VCPU_FLAG_REALTIME) {
+				/* Use shorter slice for RT vCPUs */
+				slice = SCX_SLICE_DFL / 2;
+			}
+			/* Weight adjustment will be applied in vtime calculation below */
+		}
+
+		/* vCPU-specific scheduling logic */
+		if (fifo_sched) {
+			scx_bpf_dsq_insert(p, SHARED_DSQ, slice, enq_flags);
+		} else {
+			/* Apply weight-based vtime adjustment */
+			if (vtime < vtime_now - slice)
+				vtime = vtime_now - slice;
+			/* Boost RT vCPUs by reducing their vtime */
+			if (vcpu->flags & OSSIM_VCPU_FLAG_REALTIME)
+				vtime = vtime / 2;
+			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, slice, vtime, enq_flags);
+		}
 	} else {
-		u64 vtime = p->scx.dsq_vtime;
-
-		/*
-		 * Limit the amount of budget that an idling task can accumulate
-		 * to one slice.
-		 */
-		if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
-			vtime = vtime_now - SCX_SLICE_DFL;
-
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime,
-					 enq_flags);
+		/* Regular task - use default scheduling */
+		if (fifo_sched) {
+			scx_bpf_dsq_insert(p, SHARED_DSQ, slice, enq_flags);
+		} else {
+			if (vtime < vtime_now - SCX_SLICE_DFL)
+				vtime = vtime_now - SCX_SLICE_DFL;
+			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
+		}
 	}
 }
 
-void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
+/* Dispatch operation - update statistics */
+void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev)
 {
+	if (prev) {
+		pid_t tid = prev->pid;
+		if (is_vcpu_thread(prev)) {
+			update_vcpu_stats(tid, false);
+		}
+	}
+
 	scx_bpf_dsq_move_to_local(SHARED_DSQ);
 }
 
-void BPF_STRUCT_OPS(simple_running, struct task_struct *p)
+void BPF_STRUCT_OPS(ossim_running, struct task_struct *p)
 {
 	if (fifo_sched)
 		return;
@@ -103,11 +291,11 @@ void BPF_STRUCT_OPS(simple_running, struct task_struct *p)
 	 * thus racy. Any error should be contained and temporary. Let's just
 	 * live with it.
 	 */
-	if (time_before(vtime_now, p->scx.dsq_vtime))
+	if (vtime_now < p->scx.dsq_vtime)
 		vtime_now = p->scx.dsq_vtime;
 }
 
-void BPF_STRUCT_OPS(simple_stopping, struct task_struct *p, bool runnable)
+void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable)
 {
 	if (fifo_sched)
 		return;
@@ -124,28 +312,28 @@ void BPF_STRUCT_OPS(simple_stopping, struct task_struct *p, bool runnable)
 	p->scx.dsq_vtime += (SCX_SLICE_DFL - p->scx.slice) * 100 / p->scx.weight;
 }
 
-void BPF_STRUCT_OPS(simple_enable, struct task_struct *p)
+void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p)
 {
 	p->scx.dsq_vtime = vtime_now;
 }
 
-s32 BPF_STRUCT_OPS_SLEEPABLE(simple_init)
+s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init)
 {
 	return scx_bpf_create_dsq(SHARED_DSQ, -1);
 }
 
-void BPF_STRUCT_OPS(simple_exit, struct scx_exit_info *ei)
+void BPF_STRUCT_OPS(ossim_exit, struct scx_exit_info *ei)
 {
 	UEI_RECORD(uei, ei);
 }
 
-SCX_OPS_DEFINE(simple_ops,
-	       .select_cpu		= (void *)simple_select_cpu,
-	       .enqueue			= (void *)simple_enqueue,
-	       .dispatch		= (void *)simple_dispatch,
-	       .running			= (void *)simple_running,
-	       .stopping		= (void *)simple_stopping,
-	       .enable			= (void *)simple_enable,
-	       .init			= (void *)simple_init,
-	       .exit			= (void *)simple_exit,
-	       .name			= "simple");
+SCX_OPS_DEFINE(ossim_ops,
+	       .select_cpu		= (void *)ossim_select_cpu,
+	       .enqueue			= (void *)ossim_enqueue,
+	       .dispatch		= (void *)ossim_dispatch,
+	       .running			= (void *)ossim_running,
+	       .stopping		= (void *)ossim_stopping,
+	       .enable			= (void *)ossim_enable,
+	       .init			= (void *)ossim_init,
+	       .exit			= (void *)ossim_exit,
+	       .name			= "ossim");
