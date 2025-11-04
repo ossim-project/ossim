@@ -2,8 +2,8 @@ TEST_DIMG_ISO_URL := https://cloud-images.ubuntu.com/noble/current/noble-server-
 TEST_DIMG_CKSUM_URL := https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 TEST_DIMG_DISK_SIZE := 40G
 
-TEST_VM_CPUS := 16
-TEST_VM_MEMORY := 64G
+TEST_VM_CPUS := 2
+TEST_VM_MEMORY := 4G
 
 test_dimg := $(o)test/disk.qcow2
 
@@ -37,11 +37,10 @@ $(b)meta-data:
 
 .PHONY: myqemu-test
 myqemu-test: $(test_dimg) $(TEST_VM_VIRTIOFS_SOCK)
-	$(myqemu) -machine q35,accel=kvm -cpu host -smp $(TEST_VM_CPUS) -m $(TEST_VM_MEMORY) \
+	sudo -E $(myqemu) -machine q35,accel=kvm -cpu host -smp $(TEST_VM_CPUS) -m $(TEST_VM_MEMORY) \
 	-object memory-backend-memfd,id=mem0,size=$(TEST_VM_MEMORY),share=on \
 	-numa node,memdev=mem0 \
 	-drive file=$(test_dimg),media=disk,format=qcow2,if=virtio,index=0 \
-	-netdev user,id=user-net \
 	-boot c \
 	-display none -serial mon:stdio
 

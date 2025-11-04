@@ -13,7 +13,13 @@ sudo apt-get update && sudo apt-get install -y \
     meson ninja-build \
     xsltproc libxslt1-dev libgnutls28-dev \
     python3-docutils libjson-c-dev \
-    libslirp-dev
+    libslirp-dev \
+    python3-venv python3-pip python3-setuptools \
+    libnuma-dev \
+    rustup \
+    unzip
+
+rustup default stable
 
 # if define OSSIM_PREFIX then use ${OSSIM_PREFIX}/bin, otherwise ${HOME}/bin
 YQ_INSTALL_DIR=${OSSIM_PREFIX:-${HOME}}/bin
