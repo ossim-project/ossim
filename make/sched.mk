@@ -25,3 +25,7 @@ clean-sched:
 .PHONY: run-sched
 run-sched:
 	$(MAKE) O=$(sched_b) SCX_SRC_DIR=$(scx_dir) -C $(sched_d) run-scx_ossim
+
+.PHONY: format-sched
+format-sched:
+	$(CLANG_FORMAT) -i --style=file $(shell find $(sched_d) -name '*.c' -or -name '*.h')

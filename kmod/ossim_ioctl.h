@@ -25,8 +25,8 @@
  *   -ENOMEM: Out of memory
  *   -EPERM: Caller does not match qemu_pid
  */
-#define OSSIM_IOCTL_REGISTER_VCPU \
-	_IOW(OSSIM_IOCTL_MAGIC, 1, struct ossim_vcpu_registration)
+#define OSSIM_IOCTL_REGISTER_VCPU                                              \
+  _IOW(OSSIM_IOCTL_MAGIC, 1, struct ossim_vcpu_registration)
 
 /**
  * OSSIM_IOCTL_UNREGISTER_VCPU - Unregister a vCPU thread
@@ -39,8 +39,7 @@
  *   -ENOENT: TID not registered
  *   -EPERM: Caller does not match original qemu_pid
  */
-#define OSSIM_IOCTL_UNREGISTER_VCPU \
-	_IOW(OSSIM_IOCTL_MAGIC, 2, pid_t)
+#define OSSIM_IOCTL_UNREGISTER_VCPU _IOW(OSSIM_IOCTL_MAGIC, 2, pid_t)
 
 /**
  * OSSIM_IOCTL_UPDATE_VCPU - Update vCPU metadata (priority, weight, etc.)
@@ -51,8 +50,8 @@
  *
  * Returns: 0 on success, -errno on failure
  */
-#define OSSIM_IOCTL_UPDATE_VCPU \
-	_IOW(OSSIM_IOCTL_MAGIC, 3, struct ossim_vcpu_registration)
+#define OSSIM_IOCTL_UPDATE_VCPU                                                \
+  _IOW(OSSIM_IOCTL_MAGIC, 3, struct ossim_vcpu_registration)
 
 /**
  * OSSIM_IOCTL_GET_VCPU_INFO - Query vCPU metadata
@@ -61,12 +60,12 @@
  * Allows querying registered vCPU information (primarily for debugging).
  */
 struct ossim_vcpu_query {
-	pid_t vcpu_tid;				/* Input: TID to query */
-	struct ossim_vcpu_registration info;	/* Output: Current info */
+  pid_t vcpu_tid;                      /* Input: TID to query */
+  struct ossim_vcpu_registration info; /* Output: Current info */
 };
 
-#define OSSIM_IOCTL_GET_VCPU_INFO \
-	_IOWR(OSSIM_IOCTL_MAGIC, 4, struct ossim_vcpu_query)
+#define OSSIM_IOCTL_GET_VCPU_INFO                                              \
+  _IOWR(OSSIM_IOCTL_MAGIC, 4, struct ossim_vcpu_query)
 
 /**
  * OSSIM_IOCTL_SET_VM_CONFIG - Set VM-level configuration
@@ -74,8 +73,8 @@ struct ossim_vcpu_query {
  *
  * Configures VM-wide scheduling parameters (shares, quotas, isolation).
  */
-#define OSSIM_IOCTL_SET_VM_CONFIG \
-	_IOW(OSSIM_IOCTL_MAGIC, 5, struct ossim_vm_config)
+#define OSSIM_IOCTL_SET_VM_CONFIG                                              \
+  _IOW(OSSIM_IOCTL_MAGIC, 5, struct ossim_vm_config)
 
 /**
  * OSSIM_IOCTL_LIST_VCPUS - List all registered vCPUs
@@ -84,11 +83,11 @@ struct ossim_vcpu_query {
  * Returns array of registered vCPU TIDs for monitoring/debugging.
  */
 struct ossim_vcpu_list {
-	__u32 count;		/* Input: max entries, Output: actual count */
-	pid_t tids[0];		/* Variable-length array of TIDs */
+  __u32 count;   /* Input: max entries, Output: actual count */
+  pid_t tids[0]; /* Variable-length array of TIDs */
 };
 
-#define OSSIM_IOCTL_LIST_VCPUS \
-	_IOWR(OSSIM_IOCTL_MAGIC, 6, struct ossim_vcpu_list)
+#define OSSIM_IOCTL_LIST_VCPUS                                                 \
+  _IOWR(OSSIM_IOCTL_MAGIC, 6, struct ossim_vcpu_list)
 
 #endif /* _OSSIM_IOCTL_H */
