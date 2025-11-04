@@ -84,12 +84,25 @@ static int pin_ossim_maps(struct scx_ossim *skel)
 		fprintf(stderr, "Failed to pin vcpu_metadata map: %s\n", strerror(-ret));
 		return ret;
 	}
+	if (chmod(BPF_PIN_PATH "/vcpu_metadata", 0666) < 0) {
+		fprintf(stderr, "Failed to set permissions for vcpu_metadata map: %s\n",
+			strerror(errno));
+			bpf_map__unpin(skel->maps.vcpu_metadata, BPF_PIN_PATH "/vcpu_metadata");
+			return -1;
+	}
 
 	ret = bpf_map__pin(skel->maps.vm_config, BPF_PIN_PATH "/vm_config");
 	if (ret < 0) {
 		fprintf(stderr, "Failed to pin vm_config map: %s\n", strerror(-ret));
 		bpf_map__unpin(skel->maps.vcpu_metadata, BPF_PIN_PATH "/vcpu_metadata");
 		return ret;
+	}
+	if (chmod(BPF_PIN_PATH "/vm_config", 0666) < 0) {
+		fprintf(stderr, "Failed to set permissions for vm_config map: %s\n",
+			strerror(errno));
+			bpf_map__unpin(skel->maps.vcpu_metadata, BPF_PIN_PATH "/vcpu_metadata");
+			bpf_map__unpin(skel->maps.vm_config, BPF_PIN_PATH "/vm_config");
+			return -1;
 	}
 
 	ret = bpf_map__pin(skel->maps.vcpu_stats, BPF_PIN_PATH "/vcpu_stats");
@@ -139,6 +152,7 @@ struct vcpu_stats_bpf {
 	__u64 dispatches;
 	__u64 total_runtime_ns;
 	__u64 last_enqueue_ts;
+	__u64 last_run_start_ts;
 };
 
 /* Print vCPU statistics */

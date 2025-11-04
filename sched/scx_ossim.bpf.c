@@ -101,6 +101,7 @@ struct vcpu_stats_bpf {
 	__u64 dispatches;
 	__u64 total_runtime_ns;
 	__u64 last_enqueue_ts;
+	__u64 last_run_start_ts;  /* Timestamp when task started running (for runtime tracking) */
 };
 
 struct {
@@ -154,6 +155,7 @@ static void update_vcpu_stats(pid_t tid, bool is_enqueue)
 		.dispatches = 0,
 		.total_runtime_ns = 0,
 		.last_enqueue_ts = 0,
+		.last_run_start_ts = 0,
 	};
 
 	stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
@@ -282,6 +284,17 @@ void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev)
 
 void BPF_STRUCT_OPS(ossim_running, struct task_struct *p)
 {
+	pid_t tid = p->pid;
+	struct vcpu_stats_bpf *stats;
+
+	/* Track start time for vCPU runtime calculation */
+	if (is_vcpu_thread(p)) {
+		stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+		if (stats) {
+			stats->last_run_start_ts = scx_bpf_now();
+		}
+	}
+
 	if (fifo_sched)
 		return;
 
@@ -297,6 +310,24 @@ void BPF_STRUCT_OPS(ossim_running, struct task_struct *p)
 
 void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable)
 {
+	u64 slice_ns;
+	pid_t tid = p->pid;
+	struct vcpu_stats_bpf *stats;
+
+	/* Update vCPU runtime statistics using explicit timestamps */
+	if (is_vcpu_thread(p)) {
+		stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+		if (stats && stats->last_run_start_ts > 0) {
+			u64 now = scx_bpf_now();
+			u64 runtime_ns = now - stats->last_run_start_ts;
+			__sync_fetch_and_add(&stats->total_runtime_ns, runtime_ns);
+			stats->last_run_start_ts = 0;  /* Reset for next run */
+		}
+	}
+
+	/* Calculate slice consumption for vtime accounting */
+	slice_ns = SCX_SLICE_DFL - p->scx.slice;
+
 	if (fifo_sched)
 		return;
 
@@ -309,12 +340,53 @@ void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable)
 	 * too much, determine the execution time by taking explicit timestamps
 	 * instead of depending on @p->scx.slice.
 	 */
-	p->scx.dsq_vtime += (SCX_SLICE_DFL - p->scx.slice) * 100 / p->scx.weight;
+	p->scx.dsq_vtime += slice_ns * 100 / p->scx.weight;
 }
 
 void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p)
 {
+	pid_t tid = p->pid;
+	struct vcpu_metadata_bpf *vcpu;
+	struct vcpu_stats_bpf zero_stats = {
+		.enqueues = 0,
+		.dispatches = 0,
+		.total_runtime_ns = 0,
+		.last_enqueue_ts = 0,
+		.last_run_start_ts = 0,
+	};
+
 	p->scx.dsq_vtime = vtime_now;
+
+	/*
+	 * Initialize stats entry for vCPU threads when they first join the scheduler.
+	 * This ensures runtime starts at 0 and prevents uninitialized data.
+	 */
+	vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
+	if (vcpu) {
+		/* This is a vCPU thread - ensure stats entry exists and is zeroed */
+		bpf_map_update_elem(&vcpu_stats, &tid, &zero_stats, BPF_ANY);
+	}
+}
+
+void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p)
+{
+	pid_t tid = p->pid;
+	struct vcpu_metadata_bpf *vcpu;
+
+	/*
+	 * Clean up vCPU entries when thread exits.
+	 * This handles both normal QEMU shutdown and abnormal exits (signals).
+	 * We only remove from vcpu_metadata and vcpu_stats maps here.
+	 * VM config entries are left intact as they may be shared by other vCPUs.
+
+	 TODO: Also clean up vcpu_stats map entries at proper time.
+	 */
+	vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
+	if (vcpu) {
+		/* This is a vCPU thread - clean up its entries */
+		bpf_map_delete_elem(&vcpu_metadata, &tid);
+		bpf_map_delete_elem(&vcpu_stats, &tid);
+	}
 }
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init)
@@ -334,6 +406,7 @@ SCX_OPS_DEFINE(ossim_ops,
 	       .running			= (void *)ossim_running,
 	       .stopping		= (void *)ossim_stopping,
 	       .enable			= (void *)ossim_enable,
+	       .disable			= (void *)ossim_disable,
 	       .init			= (void *)ossim_init,
 	       .exit			= (void *)ossim_exit,
 	       .name			= "ossim");

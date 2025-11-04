@@ -96,10 +96,13 @@ $(OBJ_DIR)/%.bpf.skel.h: $(OBJ_DIR)/%.bpf.o
 
 scheds: $(addprefix $(OBJ_DIR)/,$(SCHEDS))
 
+run-%: $(OBJ_DIR)/%
+	sudo $<
+
 clean:
 	rm -f *.bpf.o *.bpf.skel.h *.l1o *.l2o *.l3o scx_simple scx_qmap scx_central scx_userland scx_nest scx_flatcg scx_pair scx_prev scx_sdt
 	rm -f $(OBJ_DIR)/*.bpf.o $(OBJ_DIR)/*.bpf.skel.h $(OBJ_DIR)/*.l1o $(OBJ_DIR)/*.l2o $(OBJ_DIR)/*.l3o $(ALL_SCHEDS)
 
-.PHONY: all scheds clean $(SCHEDS)
+.PHONY: all scheds clean $(SCHEDS) run-%
 
 endif  # End of ifeq ($(skip-makefile),)
