@@ -17,3 +17,11 @@ init-scx:
 .PHONY: sched
 sched: $(scx_dir)
 	$(MAKE) O=$(sched_b) SCX_SRC_DIR=$(scx_dir) -C $(sched_d) all
+
+.PHONY: clean-sched
+clean-sched:
+	$(MAKE) O=$(sched_b) SCX_SRC_DIR=$(scx_dir) -C $(sched_d) clean
+
+.PHONY: run-sched
+run-sched:
+	$(MAKE) O=$(sched_b) SCX_SRC_DIR=$(scx_dir) -C $(sched_d) run-scx_ossim
