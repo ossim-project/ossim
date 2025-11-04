@@ -12,6 +12,9 @@ OUTPUT := $(OSSIM_OUTPUT)
 
 include make/include.mk
 
+CLANG_FORMAT ?= clang-format
+CLANG_FORMAT_STYLE ?= $(project_root).clang-format
+
 yq := yq
 
 clean: 

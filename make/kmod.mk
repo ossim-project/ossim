@@ -24,10 +24,9 @@ unload-kmod:
 .PHONY: reload-kmod
 reload-kmod: unload-kmod load-kmod
 
-.PHONY: test-kmod
-test-kmod: $(kmod_b)test/ioctl
-	$(kmod_b)test/ioctl
-	sudo dmesg | tail -n 10
+.PHONY: format-kmod
+format-kmod:
+	$(CLANG_FORMAT) -i --style=file $(shell find $(kmod_d) -name '*.c' -or -name '*.h')
 
 $(kmod_b)test/ioctl: $(kmod_d)test/ioctl.c
 	@mkdir -p $(@D)

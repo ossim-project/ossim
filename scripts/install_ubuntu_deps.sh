@@ -17,7 +17,8 @@ sudo apt-get update && sudo apt-get install -y \
     python3-venv python3-pip python3-setuptools \
     libnuma-dev \
     rustup \
-    unzip
+    unzip \
+    clang-format
 
 rustup default stable
 

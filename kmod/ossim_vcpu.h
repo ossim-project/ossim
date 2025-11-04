@@ -7,9 +7,9 @@
 #include <linux/uuid.h>
 #else
 /* Userspace includes */
+#include <linux/types.h> /* For __u8, __s32, __u32, __s64, __u64 */
 #include <stdint.h>
 #include <sys/types.h>
-#include <linux/types.h>  /* For __u8, __s32, __u32, __s64, __u64 */
 /* UUID type for userspace - compatible with uuid_t layout */
 typedef unsigned char uuid_t[16];
 #endif
@@ -21,9 +21,9 @@ typedef unsigned char uuid_t[16];
 #define OSSIM_VM_NAME_MAX 64
 
 /* vCPU thread flags */
-#define OSSIM_VCPU_FLAG_IOTHREAD  (1 << 0)  /* IO thread, not vCPU */
-#define OSSIM_VCPU_FLAG_REALTIME  (1 << 1)  /* Requires RT scheduling */
-#define OSSIM_VCPU_FLAG_PINNED    (1 << 2)  /* CPU affinity enforced */
+#define OSSIM_VCPU_FLAG_IOTHREAD (1 << 0) /* IO thread, not vCPU */
+#define OSSIM_VCPU_FLAG_REALTIME (1 << 1) /* Requires RT scheduling */
+#define OSSIM_VCPU_FLAG_PINNED (1 << 2)   /* CPU affinity enforced */
 
 /**
  * struct ossim_vcpu_registration - QEMU -> kernel vCPU registration
@@ -40,22 +40,23 @@ typedef unsigned char uuid_t[16];
  *          - Future: Could enable direct KVM stats queries or coordination
  *          Current use: Validation and metadata only
  * @flags: Bitmask of OSSIM_VCPU_FLAG_*
- * @priority_hint: Scheduling priority hint (0 = default, higher = more important)
+ * @priority_hint: Scheduling priority hint (0 = default, higher = more
+ * important)
  * @weight_hint: Scheduling weight hint for proportional share (100 = default)
  * @reserved: Reserved for future use, must be zero
  */
 struct ossim_vcpu_registration {
-	__u32 api_version;
-	uuid_t vm_uuid;
-	char vm_name[OSSIM_VM_NAME_MAX];
-	pid_t qemu_pid;
-	pid_t vcpu_tid;
-	__u32 vcpu_index;
-	__s32 kvm_fd;
-	__u32 flags;
-	__s32 priority_hint;
-	__u32 weight_hint;
-	__u32 reserved[8];
+  __u32 api_version;
+  uuid_t vm_uuid;
+  char vm_name[OSSIM_VM_NAME_MAX];
+  pid_t qemu_pid;
+  pid_t vcpu_tid;
+  __u32 vcpu_index;
+  __s32 kvm_fd;
+  __u32 flags;
+  __s32 priority_hint;
+  __u32 weight_hint;
+  __u32 reserved[8];
 } __attribute__((packed));
 
 #ifdef __KERNEL__
@@ -78,22 +79,22 @@ struct ossim_vcpu_registration {
  * @rcu: RCU callback head for safe deletion
  */
 struct ossim_vcpu_info {
-	uuid_t vm_uuid;
-	char vm_name[OSSIM_VM_NAME_MAX];
-	pid_t qemu_pid;
-	pid_t vcpu_tid;
-	__u32 vcpu_index;
-	__s32 kvm_fd;
-	__u32 flags;
-	__s32 priority_hint;
-	__u32 weight_hint;
-	u64 registration_time;
-	u64 last_update;
-	/* Statistics - updated by BPF scheduler via shared memory */
-	u64 stats_enqueues;
-	u64 stats_dispatches;
-	struct hlist_node hlist;
-	struct rcu_head rcu;
+  uuid_t vm_uuid;
+  char vm_name[OSSIM_VM_NAME_MAX];
+  pid_t qemu_pid;
+  pid_t vcpu_tid;
+  __u32 vcpu_index;
+  __s32 kvm_fd;
+  __u32 flags;
+  __s32 priority_hint;
+  __u32 weight_hint;
+  u64 registration_time;
+  u64 last_update;
+  /* Statistics - updated by BPF scheduler via shared memory */
+  u64 stats_enqueues;
+  u64 stats_dispatches;
+  struct hlist_node hlist;
+  struct rcu_head rcu;
 };
 #endif /* __KERNEL__ */
 
@@ -108,14 +109,14 @@ struct ossim_vcpu_info {
  * @isolation_level: Isolation policy (0=none, 1=soft, 2=hard)
  */
 struct ossim_vm_config {
-	uuid_t vm_uuid;
-	char vm_name[OSSIM_VM_NAME_MAX];
-	__u32 num_vcpus;
-	__u32 cpu_shares;
-	__s64 cpu_quota_us;
-	__u64 cpu_period_us;
-	__u32 isolation_level;
-	__u32 reserved[7];
+  uuid_t vm_uuid;
+  char vm_name[OSSIM_VM_NAME_MAX];
+  __u32 num_vcpus;
+  __u32 cpu_shares;
+  __s64 cpu_quota_us;
+  __u64 cpu_period_us;
+  __u32 isolation_level;
+  __u32 reserved[7];
 } __attribute__((packed));
 
 /**
@@ -124,13 +125,13 @@ struct ossim_vm_config {
  * Used by both kernel module and userspace for BPF map updates
  */
 struct vcpu_metadata_bpf {
-	__u32 vcpu_index;
-	__u32 flags;
-	__s32 priority_hint;
-	__u32 weight_hint;
-	__u64 vm_uuid_low;   /* Lower 64 bits of UUID */
-	__u64 vm_uuid_high;  /* Upper 64 bits of UUID */
-	char vm_name[OSSIM_VM_NAME_MAX];
+  __u32 vcpu_index;
+  __u32 flags;
+  __s32 priority_hint;
+  __u32 weight_hint;
+  __u64 vm_uuid_low;  /* Lower 64 bits of UUID */
+  __u64 vm_uuid_high; /* Upper 64 bits of UUID */
+  char vm_name[OSSIM_VM_NAME_MAX];
 };
 
 #endif /* _OSSIM_VCPU_H */
