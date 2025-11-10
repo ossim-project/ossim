@@ -108,6 +108,7 @@ struct vcpu_stats_bpf {
   __u64 last_enqueue_ts;
   __u64 last_run_start_ts; /* Timestamp when task started running (for runtime
                               tracking) */
+  __u64 vtime; /* Per-vCPU virtual time, initialized with global vtime_now */
 };
 
 struct {
@@ -340,6 +341,14 @@ void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable) {
    * instead of depending on @p->scx.slice.
    */
   p->scx.dsq_vtime += slice_ns * 100 / p->scx.weight;
+
+  /* Update vCPU virtual time tracking in stats map */
+  if (is_vcpu_thread(p)) {
+    stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+    if (stats) {
+      stats->vtime = p->scx.dsq_vtime;
+    }
+  }
 }
 
 void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
@@ -351,6 +360,7 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
       .total_runtime_ns = 0,
       .last_enqueue_ts = 0,
       .last_run_start_ts = 0,
+      .vtime = 0,
   };
 
   p->scx.dsq_vtime = vtime_now;
@@ -358,10 +368,12 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
   /*
    * Initialize stats entry for vCPU threads when they first join the scheduler.
    * This ensures runtime starts at 0 and prevents uninitialized data.
+   * The vCPU virtual time is initialized with the current global vtime_now.
    */
   vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
   if (vcpu) {
     /* This is a vCPU thread - ensure stats entry exists and is zeroed */
+    zero_stats.vtime = vtime_now; /* Initialize with global virtual time */
     bpf_map_update_elem(&vcpu_stats, &tid, &zero_stats, BPF_ANY);
   }
 }

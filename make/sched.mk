@@ -14,8 +14,8 @@ init-scx:
 	@rm -rf $(scx_dir)
 	$(MAKE) $(scx_dir)
 
-.PHONY: sched
-sched: $(scx_dir)
+.PHONY: build-sched
+build-sched: $(scx_dir)
 	$(MAKE) O=$(sched_b) SCX_SRC_DIR=$(scx_dir) -C $(sched_d) all
 
 .PHONY: clean-sched

@@ -7,7 +7,6 @@
  *
  * Copyright (c) 2025 Ossim Project
  */
-#include "scx_ossim.bpf.skel.h"
 #include <assert.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
@@ -20,6 +19,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "scx_ossim.bpf.skel.h"
 
 #define BPF_PIN_PATH "/sys/fs/bpf/ossim"
 
@@ -145,6 +146,7 @@ struct vcpu_stats_bpf {
   __u64 total_runtime_ns;
   __u64 last_enqueue_ts;
   __u64 last_run_start_ts;
+  __u64 vtime;
 };
 
 /* Print vCPU statistics */
@@ -155,15 +157,16 @@ static void print_vcpu_stats(struct scx_ossim *skel) {
   int count = 0;
 
   printf("\n=== vCPU Statistics ===\n");
-  printf("%-8s %-12s %-12s %-16s\n", "TID", "ENQUEUES", "DISPATCHES",
-         "RUNTIME (ms)");
+  printf("%-8s %-12s %-12s %-16s %-16s\n", "TID", "ENQUEUES", "DISPATCHES",
+         "RUNTIME (ms)", "VTIME");
 
   while (bpf_map_get_next_key(vcpu_stats_fd, &tid, &next_tid) == 0) {
     if (bpf_map_lookup_elem(vcpu_stats_fd, &next_tid, &stats) == 0) {
-      printf("%-8d %-12llu %-12llu %-16.2f\n", next_tid,
+      printf("%-8d %-12llu %-12llu %-16.2f %-16llu\n", next_tid,
              (unsigned long long)stats.enqueues,
              (unsigned long long)stats.dispatches,
-             stats.total_runtime_ns / 1000000.0);
+             stats.total_runtime_ns / 1000000.0,
+             (unsigned long long)stats.vtime);
       count++;
     }
     tid = next_tid;
