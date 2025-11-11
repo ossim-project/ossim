@@ -2,14 +2,14 @@
 /*
  * Ossim vCPU-aware scheduler.
  *
- * By default, it operates as a simple global weighted vtime scheduler.
- * When VMs are running, it identifies vCPU threads and applies VM-specific
- * scheduling policies based on metadata shared through BPF maps.
+ * This scheduler ONLY manages vCPU threads using a global vtime-ordered queue.
+ * Non-vCPU threads are dispatched to SCX_DSQ_GLOBAL and managed by the built-in
+ * scheduler, ensuring minimal overhead for regular system tasks.
  *
  * Features:
  * - vCPU thread identification and differentiated scheduling
- * - VM-aware weight adjustment and priority boosting
- * - Per-vCPU statistics tracking
+ * - Global vtime-ordered queue ensures fairness across all vCPUs
+ * - Per-vCPU statistics tracking (enqueues, dispatches, runtime)
  * - Graceful degradation when vCPU metadata is unavailable
  *
  * Architecture (Section 6.4 of specification):
@@ -30,6 +30,8 @@
  */
 #include <scx/common.bpf.h>
 
+#include "scx_ossim_common.h"
+
 char _license[] SEC("license") = "GPL";
 
 const volatile bool fifo_sched;
@@ -37,49 +39,18 @@ const volatile bool fifo_sched;
 static u64 vtime_now;
 UEI_DEFINE(uei);
 
-/* Maximum length for VM name string */
-#define OSSIM_VM_NAME_MAX 64
-
-/* vCPU thread flags */
-#define OSSIM_VCPU_FLAG_IOTHREAD (1 << 0) /* IO thread, not vCPU */
-#define OSSIM_VCPU_FLAG_REALTIME (1 << 1) /* Requires RT scheduling */
-#define OSSIM_VCPU_FLAG_PINNED (1 << 2)   /* CPU affinity enforced */
-
 /*
  * Built-in DSQs such as SCX_DSQ_GLOBAL cannot be used as priority queues
  * (meaning, cannot be dispatched to with scx_bpf_dsq_insert_vtime()). We
  * therefore create a separate DSQ with ID 0 that we dispatch to and consume
  * from.
+ *
+ * This single global vtime-ordered DSQ is used ONLY for vCPU threads,
+ * ensuring that ossim_running() always runs the vCPU thread with the globally
+ * smallest dsq_vtime across all CPUs. Non-vCPU threads use the built-in
+ * SCX_DSQ_GLOBAL and are not managed by this scheduler.
  */
 #define SHARED_DSQ 0
-
-/**
- * BPF-side view of vCPU metadata
- * Simplified from ossim_vcpu_info for BPF verifier compatibility
- */
-struct vcpu_metadata_bpf {
-  __u32 vcpu_index;
-  __u32 flags;
-  __s32 priority_hint;
-  __u32 weight_hint;
-  __u64 vm_uuid_low;  /* Lower 64 bits of UUID */
-  __u64 vm_uuid_high; /* Upper 64 bits of UUID */
-  char vm_name[OSSIM_VM_NAME_MAX];
-};
-
-struct vm_config_bpf {
-  __u32 num_vcpus;
-  __u32 cpu_shares;
-  __s64 cpu_quota_us;
-  __u64 cpu_period_us;
-  __u32 isolation_level;
-};
-
-/* Full 128-bit UUID key for vm_config map to avoid collisions */
-struct vm_uuid_key {
-  __u64 uuid_low;
-  __u64 uuid_high;
-};
 
 /* Map: TID -> vCPU metadata */
 struct {
@@ -101,16 +72,6 @@ struct {
 } vm_config SEC(".maps");
 
 /* Map: Per-vCPU statistics exported to userspace */
-struct vcpu_stats_bpf {
-  __u64 enqueues;
-  __u64 dispatches;
-  __u64 total_runtime_ns;
-  __u64 last_enqueue_ts;
-  __u64 last_run_start_ts; /* Timestamp when task started running (for runtime
-                              tracking) */
-  __u64 vtime; /* Per-vCPU virtual time, initialized with global vtime_now */
-};
-
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(key_size, sizeof(pid_t));
@@ -125,6 +86,15 @@ struct {
   __uint(value_size, sizeof(u64));
   __uint(max_entries, 2); /* [local, global] */
 } stats SEC(".maps");
+
+/* Map: Track start timestamp for vCPU threads (for runtime measurement) */
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(key_size, sizeof(pid_t));
+  __uint(value_size, sizeof(u64)); /* start timestamp */
+  __uint(max_entries, 4096);       /* Match vcpu_metadata max_entries */
+  __uint(map_flags, BPF_F_NO_PREALLOC);
+} task_start_ts SEC(".maps");
 
 static void stat_inc(u32 idx) {
   u64 *cnt_p = bpf_map_lookup_elem(&stats, &idx);
@@ -141,15 +111,6 @@ static bool is_vcpu_thread(struct task_struct *p) {
   return vcpu != NULL;
 }
 
-/* Get VM configuration for a vCPU */
-static struct vm_config_bpf *get_vm_config(struct vcpu_metadata_bpf *vcpu) {
-  struct vm_uuid_key key = {
-      .uuid_low = vcpu->vm_uuid_low,
-      .uuid_high = vcpu->vm_uuid_high,
-  };
-  return bpf_map_lookup_elem(&vm_config, &key);
-}
-
 /* Update vCPU statistics */
 static void update_vcpu_stats(pid_t tid, bool is_enqueue) {
   struct vcpu_stats_bpf *stats;
@@ -158,7 +119,7 @@ static void update_vcpu_stats(pid_t tid, bool is_enqueue) {
       .dispatches = 0,
       .total_runtime_ns = 0,
       .last_enqueue_ts = 0,
-      .last_run_start_ts = 0,
+      .vtime = 0,
   };
 
   stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
@@ -210,69 +171,56 @@ s32 BPF_STRUCT_OPS(ossim_select_cpu, struct task_struct *p, s32 prev_cpu,
  * 1. Lookup task TID in vcpu_metadata map (O(1) hash lookup)
  * 2. If vCPU found:
  *    a. Update vCPU statistics (enqueue counter, timestamp)
- *    b. Lookup VM configuration using full 128-bit UUID key
- *    c. Apply weight adjustment: adjusted_weight = (vcpu_weight *
- * vm_cpu_shares) / 1024 d. Check REALTIME flag -> use shorter time slice if set
- *    e. Insert into SHARED_DSQ using FIFO (if RT) or vtime-based scheduling
+ *    b. Insert into SHARED_DSQ using FIFO or vtime-based scheduling
  * 3. If not vCPU (regular task):
- *    a. Use default scheduling policy (FIFO or vtime-based)
- *    b. No statistics tracking, no weight adjustment
+ *    a. Dispatch to SCX_DSQ_GLOBAL (built-in scheduler manages it)
+ *    b. No custom scheduling policy applied
  *
  * Graceful Degradation:
- * - If vcpu_metadata map is empty (no VMs running), all tasks are regular tasks
- * - If vm_config lookup fails, uses default weight from vcpu_metadata
- * - Scheduler operates normally even if ossim.ko is not loaded
+ * - If vcpu_metadata map is empty (no VMs running), all tasks bypass to
+ * built-in
+ * - Scheduler only actively manages vCPU threads
  */
 void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
   pid_t tid = p->pid;
   struct vcpu_metadata_bpf *vcpu;
-  struct vm_config_bpf *vm_cfg;
   u64 slice = SCX_SLICE_DFL;
-  u64 vtime = p->scx.dsq_vtime;
-
-  stat_inc(1); /* count global queueing */
+  u64 vtime = 0;
+  struct vcpu_stats_bpf *stats;
 
   /* Check if this is a vCPU thread */
   vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
   if (vcpu) {
-    /* This is a vCPU - apply VM-specific scheduling */
-    update_vcpu_stats(tid, true);
+    /* This is a vCPU - manage it with our custom scheduler */
+    stat_inc(1); /* count global queueing */
 
-    vm_cfg = get_vm_config(vcpu);
-    if (vm_cfg) {
-      /* Apply priority boost if requested */
-      if (vcpu->flags & OSSIM_VCPU_FLAG_REALTIME) {
-        /* Use shorter slice for RT vCPUs */
-        slice = SCX_SLICE_DFL / 2;
-      }
-      /* Weight adjustment will be applied in vtime calculation below */
+    stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+    if (stats) {
+      vtime = stats->vtime;
     }
 
-    /* vCPU-specific scheduling logic */
+    update_vcpu_stats(tid, true);
+
+    /* Insert into SHARED_DSQ with vtime ordering */
     if (fifo_sched) {
       scx_bpf_dsq_insert(p, SHARED_DSQ, slice, enq_flags);
     } else {
-      /* Apply weight-based vtime adjustment */
-      if (vtime < vtime_now - slice)
-        vtime = vtime_now - slice;
-      /* Boost RT vCPUs by reducing their vtime */
-      if (vcpu->flags & OSSIM_VCPU_FLAG_REALTIME)
-        vtime = vtime / 2;
       scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, slice, vtime, enq_flags);
     }
   } else {
-    /* Regular task - use default scheduling */
-    if (fifo_sched) {
-      scx_bpf_dsq_insert(p, SHARED_DSQ, slice, enq_flags);
-    } else {
-      if (vtime < vtime_now - SCX_SLICE_DFL)
-        vtime = vtime_now - SCX_SLICE_DFL;
-      scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
-    }
+    /* Not a vCPU - let built-in scheduler handle it */
+    stat_inc(0); /* count local/built-in queueing */
+    scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, slice, enq_flags);
   }
 }
 
-/* Dispatch operation - update statistics */
+/*
+ * Dispatch operation - consume from vCPU queue
+ *
+ * This callback is invoked when the scheduler needs to dispatch a task to run.
+ * We only consume from SHARED_DSQ (vCPU threads). Non-vCPU threads in
+ * SCX_DSQ_GLOBAL are automatically handled by the built-in consume logic.
+ */
 void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
   if (prev) {
     pid_t tid = prev->pid;
@@ -281,72 +229,69 @@ void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
     }
   }
 
+  /* Consume vCPU threads from our custom queue */
   scx_bpf_dsq_move_to_local(SHARED_DSQ);
 }
 
 void BPF_STRUCT_OPS(ossim_running, struct task_struct *p) {
-  pid_t tid = p->pid;
-  struct vcpu_stats_bpf *stats;
 
-  /* Track start time for vCPU runtime calculation */
+  /* Track start time for vCPU threads only */
   if (is_vcpu_thread(p)) {
-    stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
-    if (stats) {
-      stats->last_run_start_ts = scx_bpf_now();
+    /*
+     * Track the global minimum vtime among vCPU threads.
+     *
+     * Since we use a single global vtime-ordered dispatch queue (SHARED_DSQ)
+     * for vCPU threads only, when a vCPU thread is running, p->scx.dsq_vtime
+     * represents the minimum vtime among all runnable vCPU threads.
+     *
+     * We update vtime_now to track this global minimum, which is used for:
+     * 1. Initializing new vCPU thread vtimes
+     * 2. Enforcing vtime delta constraints for time-skew bounding
+     *
+     * Note: Only updated when vCPU threads are running. Non-vCPU threads are
+     * ignored as they don't participate in our vtime scheduling.
+     */
+    if (vtime_now < p->scx.dsq_vtime) {
+      vtime_now = p->scx.dsq_vtime;
     }
+
+    pid_t tid = p->pid;
+    u64 now = scx_bpf_now();
+    bpf_map_update_elem(&task_start_ts, &tid, &now, BPF_ANY);
   }
-
-  if (fifo_sched)
-    return;
-
-  /*
-   * Global vtime always progresses forward as tasks start executing. The
-   * test and update can be performed concurrently from multiple CPUs and
-   * thus racy. Any error should be contained and temporary. Let's just
-   * live with it.
-   */
-  if (vtime_now < p->scx.dsq_vtime)
-    vtime_now = p->scx.dsq_vtime;
 }
 
 void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable) {
-  u64 slice_ns;
-  pid_t tid = p->pid;
-  struct vcpu_stats_bpf *stats;
 
-  /* Update vCPU runtime statistics using explicit timestamps */
-  if (is_vcpu_thread(p)) {
-    stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
-    if (stats && stats->last_run_start_ts > 0) {
-      u64 now = scx_bpf_now();
-      u64 runtime_ns = now - stats->last_run_start_ts;
-      __sync_fetch_and_add(&stats->total_runtime_ns, runtime_ns);
-      stats->last_run_start_ts = 0; /* Reset for next run */
-    }
+  /* Only track runtime for vCPU threads */
+  if (!is_vcpu_thread(p)) {
+    return;
   }
 
-  /* Calculate slice consumption for vtime accounting */
-  slice_ns = SCX_SLICE_DFL - p->scx.slice;
+  pid_t tid = p->pid;
+  u64 runtime_ns = 0;
+  u64 *start_ts;
+  u64 now = scx_bpf_now();
 
-  if (fifo_sched)
-    return;
+  /* Measure runtime using timestamps */
+  start_ts = bpf_map_lookup_elem(&task_start_ts, &tid);
+  if (start_ts && *start_ts > 0) {
+    runtime_ns = now - *start_ts;
+    /* Remove from map to clean up */
+    bpf_map_delete_elem(&task_start_ts, &tid);
+  }
 
-  /*
-   * Scale the execution time by the inverse of the weight and charge.
-   *
-   * Note that the default yield implementation yields by setting
-   * @p->scx.slice to zero and the following would treat the yielding task
-   * as if it has consumed all its slice. If this penalizes yielding tasks
-   * too much, determine the execution time by taking explicit timestamps
-   * instead of depending on @p->scx.slice.
-   */
-  p->scx.dsq_vtime += slice_ns * 100 / p->scx.weight;
+  /* Update vCPU runtime statistics and vtime */
+  struct vcpu_stats_bpf *stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
+  if (stats) {
+    if (runtime_ns > 0) {
+      __sync_fetch_and_add(&stats->vtime, runtime_ns);
+      stats->total_runtime_ns += runtime_ns;
+    }
 
-  /* Update vCPU virtual time tracking in stats map */
-  if (is_vcpu_thread(p)) {
-    stats = bpf_map_lookup_elem(&vcpu_stats, &tid);
-    if (stats) {
-      stats->vtime = p->scx.dsq_vtime;
+    if (!fifo_sched) {
+      /* Update task's vtime for next scheduling decision */
+      p->scx.dsq_vtime = stats->vtime;
     }
   }
 }
@@ -359,8 +304,7 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
       .dispatches = 0,
       .total_runtime_ns = 0,
       .last_enqueue_ts = 0,
-      .last_run_start_ts = 0,
-      .vtime = 0,
+      .vtime = vtime_now,
   };
 
   p->scx.dsq_vtime = vtime_now;
@@ -368,12 +312,10 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
   /*
    * Initialize stats entry for vCPU threads when they first join the scheduler.
    * This ensures runtime starts at 0 and prevents uninitialized data.
-   * The vCPU virtual time is initialized with the current global vtime_now.
    */
   vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
   if (vcpu) {
     /* This is a vCPU thread - ensure stats entry exists and is zeroed */
-    zero_stats.vtime = vtime_now; /* Initialize with global virtual time */
     bpf_map_update_elem(&vcpu_stats, &tid, &zero_stats, BPF_ANY);
   }
 }
@@ -387,12 +329,11 @@ void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p) {
    * This handles both normal QEMU shutdown and abnormal exits (signals).
    * We only remove from vcpu_metadata and vcpu_stats maps here.
    * VM config entries are left intact as they may be shared by other vCPUs.
-
-   TODO: Also clean up vcpu_stats map entries at proper time.
    */
   vcpu = bpf_map_lookup_elem(&vcpu_metadata, &tid);
   if (vcpu) {
     /* This is a vCPU thread - clean up its entries */
+    bpf_map_delete_elem(&task_start_ts, &tid);
     bpf_map_delete_elem(&vcpu_metadata, &tid);
     bpf_map_delete_elem(&vcpu_stats, &tid);
   }

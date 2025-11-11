@@ -22,6 +22,8 @@
 
 #include "scx_ossim.bpf.skel.h"
 
+#include "scx_ossim_common.h"
+
 #define BPF_PIN_PATH "/sys/fs/bpf/ossim"
 
 const char help_fmt[] =
@@ -138,16 +140,6 @@ static void read_stats(struct scx_ossim *skel, __u64 *stats) {
       stats[idx] += cnts[idx][cpu];
   }
 }
-
-/* vCPU statistics structure matching BPF-side definition */
-struct vcpu_stats_bpf {
-  __u64 enqueues;
-  __u64 dispatches;
-  __u64 total_runtime_ns;
-  __u64 last_enqueue_ts;
-  __u64 last_run_start_ts;
-  __u64 vtime;
-};
 
 /* Print vCPU statistics */
 static void print_vcpu_stats(struct scx_ossim *skel) {

@@ -79,12 +79,12 @@ SCHEDS := scx_ossim
 all: scheds
 
 # Build regular schedulers (no library dependency) - from source to output dir
-$(addprefix $(OBJ_DIR)/,$(SCHEDS)): $(OBJ_DIR)/%: $(SRC_DIR)/%.c $(OBJ_DIR)/%.bpf.skel.h
+$(addprefix $(OBJ_DIR)/,$(SCHEDS)): $(OBJ_DIR)/%: $(SRC_DIR)/%.c $(OBJ_DIR)/%.bpf.skel.h $(SRC_DIR)/scx_ossim_common.h
 	@echo "Building scheduler: $@"
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS)
 
-$(OBJ_DIR)/%.bpf.o: $(SRC_DIR)/%.bpf.c
+$(OBJ_DIR)/%.bpf.o: $(SRC_DIR)/%.bpf.c $(SRC_DIR)/scx_ossim_common.h
 	@echo "Compiling BPF: $< -> $@"
 	@mkdir -p $(dir $@)
 	$(BPF_CLANG) $(BPF_CFLAGS) -target bpf $(BPF_INCLUDES) -c $< -o $@
