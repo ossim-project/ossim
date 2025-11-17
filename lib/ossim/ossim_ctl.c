@@ -239,14 +239,94 @@ int ossim_ctl_shutdown(struct ossim_ctl *ctl) {
 }
 
 /**
- * ossim_ctl_register_vcpu - Register a vCPU thread (future use)
+ * ossim_ctl_register_vcpu - Register a vCPU thread
  */
 int ossim_ctl_register_vcpu(struct ossim_ctl *ctl,
                             struct ossim_ctl_vcpu_registration *vcpu) {
-  /* TODO: Implement when server supports this command */
-  (void)ctl;
-  (void)vcpu;
-  return OSSIM_ERR_INVALID;
+  char command[OSSIM_RPC_BUFFER_SIZE];
+  char response[OSSIM_RPC_BUFFER_SIZE];
+  int ret;
+
+  if (!ctl || !vcpu) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  /* Format command: register_vcpu <tid> <vm_id> <vcpu_id> */
+  snprintf(command, sizeof(command), "register_vcpu %d %u %u", vcpu->vcpu_tid,
+           vcpu->vm_id, vcpu->vcpu_id);
+
+  ret = ossim_ctl_send_command(ctl, command, response, sizeof(response));
+  if (ret != OSSIM_OK) {
+    return ret;
+  }
+
+  /* Check for "OK:" response */
+  if (strncmp(response, "OK:", 3) != 0) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+
+  return OSSIM_OK;
+}
+
+/**
+ * ossim_ctl_unregister_vcpu - Unregister a vCPU thread
+ */
+int ossim_ctl_unregister_vcpu(struct ossim_ctl *ctl, pid_t tid) {
+  char command[OSSIM_RPC_BUFFER_SIZE];
+  char response[OSSIM_RPC_BUFFER_SIZE];
+  int ret;
+
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  /* Format command: unregister_vcpu <tid> */
+  snprintf(command, sizeof(command), "unregister_vcpu %d", tid);
+
+  ret = ossim_ctl_send_command(ctl, command, response, sizeof(response));
+  if (ret != OSSIM_OK) {
+    return ret;
+  }
+
+  /* Check for "OK:" response */
+  if (strncmp(response, "OK:", 3) != 0) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+
+  return OSSIM_OK;
+}
+
+/**
+ * ossim_ctl_query_vcpu - Query vCPU registration status
+ */
+int ossim_ctl_query_vcpu(struct ossim_ctl *ctl, pid_t tid,
+                         struct ossim_vcpu_metadata *metadata) {
+  char command[OSSIM_RPC_BUFFER_SIZE];
+  char response[OSSIM_RPC_BUFFER_SIZE];
+  int ret;
+
+  if (!ctl || !metadata) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  /* Format command: query_vcpu <tid> */
+  snprintf(command, sizeof(command), "query_vcpu %d", tid);
+
+  ret = ossim_ctl_send_command(ctl, command, response, sizeof(response));
+  if (ret != OSSIM_OK) {
+    return ret;
+  }
+
+  /* Parse response: "OK: tid=<tid> vm_id=<vm_id> vcpu_id=<vcpu_id>
+   * timestamp=<timestamp>" */
+  ret = sscanf(response, "OK: tid=%d vm_id=%u vcpu_id=%u timestamp=%lu",
+               &metadata->tid, &metadata->vm_id, &metadata->vcpu_id,
+               &metadata->timestamp);
+  if (ret != 4) {
+    return OSSIM_ERR_PARSE;
+  }
+
+  return OSSIM_OK;
 }
 
 /**

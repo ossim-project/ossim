@@ -47,10 +47,57 @@ struct {
   __uint(max_entries, 2); /* [local, global] */
 } stats SEC(".maps");
 
+/* FIFO queue for pending vCPU registration events */
+struct {
+  __uint(type, BPF_MAP_TYPE_QUEUE);
+  __uint(max_entries, OSSIM_MAX_PENDING_EVENTS);
+  __type(value, struct ossim_vcpu_event);
+} vcpu_event_queue SEC(".maps");
+
+/* Hash map storing registered vCPUs (key: TID, value: metadata) */
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, OSSIM_MAX_VCPUS);
+  __type(key, pid_t);
+  __type(value, struct ossim_bpf_vcpu_metadata);
+} vcpu_registry SEC(".maps");
+
 static void stat_inc(u32 idx) {
   u64 *cnt_p = bpf_map_lookup_elem(&stats, &idx);
   if (cnt_p)
     (*cnt_p)++;
+}
+
+/* Process pending vCPU registration events from the queue */
+static void process_vcpu_events(void) {
+  struct ossim_vcpu_event event;
+  int ret;
+
+/* Process up to 32 events per call to avoid hogging CPU */
+#pragma unroll
+  for (int i = 0; i < 32; i++) {
+    ret = bpf_map_pop_elem(&vcpu_event_queue, &event);
+    if (ret != 0) {
+      /* Queue is empty */
+      break;
+    }
+
+    if (event.event_type == OSSIM_EVENT_VCPU_REGISTER) {
+      struct ossim_bpf_vcpu_metadata metadata = {
+          .tid = event.tid,
+          .vm_id = event.vm_id,
+          .vcpu_id = event.vcpu_id,
+          .timestamp = bpf_ktime_get_ns(),
+      };
+
+      /* Register the vCPU in the registry */
+      bpf_map_update_elem(&vcpu_registry, &event.tid, &metadata, BPF_ANY);
+
+    } else if (event.event_type == OSSIM_EVENT_VCPU_UNREGISTER) {
+      /* Unregister the vCPU from the registry */
+      bpf_map_delete_elem(&vcpu_registry, &event.tid);
+    }
+  }
 }
 
 s32 BPF_STRUCT_OPS(ossim_select_cpu, struct task_struct *p, s32 prev_cpu,
@@ -87,6 +134,9 @@ void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
 }
 
 void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
+  /* Process pending vCPU registration events */
+  process_vcpu_events();
+
   scx_bpf_dsq_move_to_local(SHARED_DSQ);
 }
 
