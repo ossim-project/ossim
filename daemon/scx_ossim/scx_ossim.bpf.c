@@ -22,7 +22,7 @@
  */
 #include <scx/common.bpf.h>
 
-#include "scx_ossim_common.h"
+#include "interface.h"
 
 char _license[] SEC("license") = "GPL";
 

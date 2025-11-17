@@ -7,8 +7,8 @@
  *
  * Copyright (c) 2025 Ossim Project
  */
-#ifndef __SCX_OSSIM_COMMON_H
-#define __SCX_OSSIM_COMMON_H
+#ifndef __SCX_OSSIM_H
+#define __SCX_OSSIM_H
 
 /* BPF environment already has types from vmlinux.h */
 #ifndef __BPF__
@@ -17,4 +17,4 @@
 #include "vmlinux.h"
 #endif
 
-#endif /* __SCX_OSSIM_COMMON_H */
+#endif /* __SCX_OSSIM_H */

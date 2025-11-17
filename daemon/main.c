@@ -18,8 +18,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "scx_ossim.bpf.skel.h"
-#include "scx_ossim_common.h"
+#include "scx_ossim/scx_ossim.bpf.skel.h"
+#include "scx_ossim/interface.h"
 
 #define SOCKET_PATH "/tmp/scx_ossim.sock"
 #define MAX_CLIENTS 10

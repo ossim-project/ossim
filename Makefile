@@ -26,8 +26,7 @@ qemu := qemu-system-x86_64
 include make/qemu.mk
 include make/libvirt.mk
 include make/linux.mk
-include make/kmod.mk
-include make/sched.mk
+include make/daemon.mk
 
 $(eval $(call include_rules,$(d)utils/rules.mk))
 $(eval $(call include_rules,$(d)images/rules.mk))

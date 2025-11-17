@@ -4,12 +4,6 @@ else
   KBUILD_OUTPUT := $(CURDIR)/build
 endif
 
-ifeq ($(SCX_SRC_DIR),)
-$(error Please set SCX_SRC_DIR)
-endif
-
-SCX_SRC_DIR := $(abspath $(SCX_SRC_DIR))
-
 # Always redirect to out-of-tree build directory unless we're already there
 ifneq ($(KBUILD_OUTPUT), $(CURDIR))
 # Only redirect if ROOT_SRC_DIR is not set (i.e., we're not already redirected)
@@ -59,6 +53,11 @@ export BPF_CFLAGS := -g -O2 -Wall -Wno-compare-distinct-pointer-types \
 
 # SRC_DIR is set by the top-level make call for out-of-source builds
 export SRC_DIR ?= $(CURDIR)
+export OBJ_DIR := $(CURDIR)
+
+SCX_SRC_DIR ?= $(OBJ_DIR)/scx
+SCX_VERSION := 1.0.16
+
 export BPF_INCLUDES := -I$(SCX_SRC_DIR)/scheds/include \
 	-I$(SCX_SRC_DIR)/scheds/include/bpf-compat \
 	-I$(SCX_SRC_DIR)/scheds/include/lib \
@@ -66,43 +65,44 @@ export BPF_INCLUDES := -I$(SCX_SRC_DIR)/scheds/include \
 	-I$(SCX_SRC_DIR)/scheds/vmlinux/arch/$(TARGET_ARCH) \
 	$(LIBBPF_CFLAGS)
 
-export OBJ_DIR := $(CURDIR)
-
 export CFLAGS := -std=gnu11 -I$(SCX_SRC_DIR)/scheds/include -I$(SCX_SRC_DIR)/scheds/vmlinux -I$(SRC_DIR) -I$(OBJ_DIR) $(LIBBPF_CFLAGS)
 
 export LIBBPF_DEPS := $(LIBBPF_LIBS) -lelf -lz -lzstd
 export THREAD_DEPS := -lpthread
 
 # Scheduler lists for convenience targets
-SCHEDS := scx_ossim
 
-all: scheds
+TARGET := ossimd
 
-# Build regular schedulers (no library dependency) - from source to output dir
-$(addprefix $(OBJ_DIR)/,$(SCHEDS)): $(OBJ_DIR)/%: $(SRC_DIR)/%.c $(OBJ_DIR)/%.bpf.skel.h $(SRC_DIR)/scx_ossim_common.h
-	@echo "Building scheduler: $@"
+all: $(OBJ_DIR)/$(TARGET)
+
+DEPS := $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h $(SRC_DIR)/scx_ossim/interface.h
+
+$(OBJ_DIR)/$(TARGET): $(SRC_DIR)/main.c $(DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $< -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS)
+	$(CC) $(CFLAGS) $< -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS) -I$(OBJ_DIR)
 
-$(OBJ_DIR)/%.bpf.o: $(SRC_DIR)/%.bpf.c $(SRC_DIR)/scx_ossim_common.h
+$(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o: $(SRC_DIR)/scx_ossim/scx_ossim.bpf.c $(SRC_DIR)/scx_ossim/interface.h $(SCX_SRC_DIR)/Makefile.md
 	@echo "Compiling BPF: $< -> $@"
 	@mkdir -p $(dir $@)
 	$(BPF_CLANG) $(BPF_CFLAGS) -target bpf $(BPF_INCLUDES) -c $< -o $@
 
-$(OBJ_DIR)/%.bpf.skel.h: $(OBJ_DIR)/%.bpf.o
+$(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h: $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o
 	@echo "Generating skeleton: $@"
 	@mkdir -p $(dir $@)
 	$(BPFTOOL) gen skeleton $< name $(basename $(basename $(notdir $<))) > $@
 
-scheds: $(addprefix $(OBJ_DIR)/,$(SCHEDS))
+$(SCX_SRC_DIR)/Makefile.md:
+	rm -rf $(dir $@)
+	git clone https://github.com/sched-ext/scx.git --branch v$(SCX_VERSION) $(dir $@)
 
-run-%: $(OBJ_DIR)/%
+run: $(OBJ_DIR)/$(TARGET)
 	sudo $<
 
 clean:
-	rm -f *.bpf.o *.bpf.skel.h *.l1o *.l2o *.l3o $(SCHEDS)
-	rm -f $(OBJ_DIR)/*.bpf.o $(OBJ_DIR)/*.bpf.skel.h $(OBJ_DIR)/*.l1o $(OBJ_DIR)/*.l2o $(OBJ_DIR)/*.l3o $(ALL_SCHEDS)
+	rm -f $(OBJ_DIR)/*.bpf.o $(OBJ_DIR)/*.bpf.skel.h $(OBJ_DIR)/*.l1o $(OBJ_DIR)/*.l2o $(OBJ_DIR)/*.l3o $(OBJ_DIR)/$(TARGET)
+	rm -rf $(OBJ_DIR)/scx/
 
-.PHONY: all scheds clean $(SCHEDS) run-%
+.PHONY: all clean run
 
 endif  # End of ifeq ($(skip-makefile),)
