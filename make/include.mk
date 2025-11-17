@@ -3,7 +3,7 @@ OUTPUT ?= out/
 # Build directory 
 BUILD ?= build/
 # Prefix
-PREFIX ?= install/
+PREFIX ?= /usr/local/ossim/
 
 OUTPUT := $(if $(filter %/,$(OUTPUT)),$(OUTPUT),$(OUTPUT)/)
 BUILD := $(if $(filter %/,$(BUILD)),$(BUILD),$(BUILD)/)

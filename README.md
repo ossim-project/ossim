@@ -12,19 +12,31 @@ Prerequisites:
 
 You may also want to configure the following environment variables:
 
-- `OSSIM_PREFIX`: The install directory, default: `./install/`
+- `OSSIM_PREFIX`: The install directory, default: `/usr/local/ossim/`
 - `OSSIM_BUILD`: The build directory, default: `./build/`
 - `OSSIM_OUTPUT`: The output directory, default: `./out/`
 
 Steps:
 
-1. Install dependencies:
+1. Update `PATH` and `LD_LIBRARY_PATH` to include the prefix:
+    ```sh
+    export PATH=${OSSIM_PREFIX}/bin${PATH:+:$PATH}
+    export LD_LIBRARY_PATH=${OSSIM_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    export LIBRARY_PATH=${OSSIM_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
+    export CPATH=${OSSIM_PREFIX}/include${CPATH:+:$CPATH}
+    export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+    ```
+    You may want to persist these changes in your `.bashrc` file.
+
+2. Install dependencies:
 
     ```sh
     bash scripts/install_ubuntu_deps.sh
     ```
 
-2. Add the current user to related groups and relogin:
+    This may take more than 10 minutes because it builds some dependencies (e.g., gRPC) from source.
+
+3. Add the current user to related groups and relogin:
 
     ```sh
     sudo adduser $USER kvm
@@ -33,14 +45,14 @@ Steps:
 
     You may want to re-login for the configuration to take effect.
 
-3. Initialize submodules:
+4. Initialize submodules:
 
     ```sh
     git submodule update --init --depth 1 linux
     git submodule update --init --recursive --depth 1 qemu
     ```
 
-4. Build QEMU
+5. Build QEMU
 
     ```sh
     make configure-qemu
