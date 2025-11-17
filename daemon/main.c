@@ -18,8 +18,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "scx_ossim/scx_ossim.bpf.skel.h"
 #include "scx_ossim/interface.h"
+#include "scx_ossim/scx_ossim.bpf.skel.h"
 
 #define SOCKET_PATH "/tmp/scx_ossim.sock"
 #define MAX_CLIENTS 10
@@ -75,12 +75,96 @@ static void read_stats(struct scx_ossim *skel, __u64 *stats) {
   }
 }
 
+/* Print registered vCPUs */
+static void print_registered_vcpus(struct scx_ossim *skel) {
+  pid_t key, next_key;
+  struct ossim_bpf_vcpu_metadata metadata;
+  int count = 0;
+  int map_fd = bpf_map__fd(skel->maps.vcpu_registry);
+
+  printf("Registered vCPUs:\n");
+
+  /* Iterate through all keys in the hash map */
+  key = 0;
+  while (bpf_map_get_next_key(map_fd, &key, &next_key) == 0) {
+    if (bpf_map_lookup_elem(map_fd, &next_key, &metadata) == 0) {
+      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u timestamp=%llu\n", count,
+             metadata.tid, metadata.vm_id, metadata.vcpu_id,
+             metadata.timestamp);
+      count++;
+    }
+    key = next_key;
+  }
+
+  if (count == 0) {
+    printf("  (none)\n");
+  }
+}
+
+/* Register a vCPU by pushing an event to the queue */
+static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
+                         __u32 vcpu_id) {
+  struct ossim_vcpu_event event = {
+      .event_type = OSSIM_EVENT_VCPU_REGISTER,
+      .tid = tid,
+      .vm_id = vm_id,
+      .vcpu_id = vcpu_id,
+  };
+
+  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.vcpu_event_queue), NULL,
+                                &event, BPF_ANY);
+  if (ret < 0) {
+    fprintf(stderr, "Failed to push vCPU registration event: %s\n",
+            strerror(errno));
+    return ret;
+  }
+
+  if (verbose) {
+    printf("Registered vCPU: tid=%d vm_id=%u vcpu_id=%u\n", tid, vm_id,
+           vcpu_id);
+  }
+
+  return 0;
+}
+
+/* Unregister a vCPU by pushing an event to the queue */
+static int unregister_vcpu(struct scx_ossim *skel, pid_t tid) {
+  struct ossim_vcpu_event event = {
+      .event_type = OSSIM_EVENT_VCPU_UNREGISTER,
+      .tid = tid,
+      .vm_id = 0,
+      .vcpu_id = 0,
+  };
+
+  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.vcpu_event_queue), NULL,
+                                &event, BPF_ANY);
+  if (ret < 0) {
+    fprintf(stderr, "Failed to push vCPU unregistration event: %s\n",
+            strerror(errno));
+    return ret;
+  }
+
+  if (verbose) {
+    printf("Unregistered vCPU: tid=%d\n", tid);
+  }
+
+  return 0;
+}
+
+/* Query vCPU registration status */
+static int query_vcpu(struct scx_ossim *skel, pid_t tid,
+                      struct ossim_bpf_vcpu_metadata *metadata) {
+  int ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.vcpu_registry), &tid,
+                                metadata);
+  return ret;
+}
+
 /* Handle client request */
 static void handle_client(int client_fd, struct scx_ossim *skel) {
   char buffer[256];
   ssize_t bytes_read;
   __u64 stats[2];
-  char response[256];
+  char response[1024];
 
   bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
   if (bytes_read <= 0) {
@@ -109,17 +193,75 @@ static void handle_client(int client_fd, struct scx_ossim *skel) {
   } else if (strcmp(buffer, "global") == 0) {
     read_stats(skel, stats);
     snprintf(response, sizeof(response), "%llu\n", stats[1]);
+  } else if (strncmp(buffer, "register_vcpu ", 14) == 0) {
+    /* Format: register_vcpu <tid> <vm_id> <vcpu_id> */
+    int tid, vm_id, vcpu_id;
+    if (sscanf(buffer + 14, "%d %u %u", &tid, &vm_id, &vcpu_id) == 3) {
+      int ret = register_vcpu(skel, tid, vm_id, vcpu_id);
+      if (ret == 0) {
+        snprintf(response, sizeof(response),
+                 "OK: Registered vCPU tid=%d vm_id=%u vcpu_id=%u\n", tid, vm_id,
+                 vcpu_id);
+      } else {
+        snprintf(response, sizeof(response),
+                 "ERROR: Failed to register vCPU (errno=%d)\n", -ret);
+      }
+    } else {
+      snprintf(response, sizeof(response),
+               "ERROR: Invalid format. Use: register_vcpu <tid> <vm_id> "
+               "<vcpu_id>\n");
+    }
+  } else if (strncmp(buffer, "unregister_vcpu ", 16) == 0) {
+    /* Format: unregister_vcpu <tid> */
+    int tid;
+    if (sscanf(buffer + 16, "%d", &tid) == 1) {
+      int ret = unregister_vcpu(skel, tid);
+      if (ret == 0) {
+        snprintf(response, sizeof(response), "OK: Unregistered vCPU tid=%d\n",
+                 tid);
+      } else {
+        snprintf(response, sizeof(response),
+                 "ERROR: Failed to unregister vCPU (errno=%d)\n", -ret);
+      }
+    } else {
+      snprintf(response, sizeof(response),
+               "ERROR: Invalid format. Use: unregister_vcpu <tid>\n");
+    }
+  } else if (strncmp(buffer, "query_vcpu ", 11) == 0) {
+    /* Format: query_vcpu <tid> */
+    int tid;
+    if (sscanf(buffer + 11, "%d", &tid) == 1) {
+      struct ossim_bpf_vcpu_metadata metadata;
+      int ret = query_vcpu(skel, tid, &metadata);
+      if (ret == 0) {
+        snprintf(response, sizeof(response),
+                 "OK: tid=%d vm_id=%u vcpu_id=%u timestamp=%llu\n",
+                 metadata.tid, metadata.vm_id, metadata.vcpu_id,
+                 metadata.timestamp);
+      } else {
+        snprintf(response, sizeof(response),
+                 "ERROR: vCPU tid=%d not registered\n", tid);
+      }
+    } else {
+      snprintf(response, sizeof(response),
+               "ERROR: Invalid format. Use: query_vcpu <tid>\n");
+    }
   } else if (strcmp(buffer, "shutdown") == 0) {
     snprintf(response, sizeof(response), "OK\n");
     exit_req = 1;
   } else if (strcmp(buffer, "help") == 0) {
     snprintf(response, sizeof(response),
              "Available commands:\n"
-             "  stats    - Get both local and global enqueue counts\n"
-             "  local    - Get local enqueue count\n"
-             "  global   - Get global enqueue count\n"
-             "  shutdown - Shutdown the scheduler\n"
-             "  help     - Show this help message\n");
+             "  stats                              - Get both local and global "
+             "enqueue counts\n"
+             "  local                              - Get local enqueue count\n"
+             "  global                             - Get global enqueue count\n"
+             "  register_vcpu <tid> <vm_id> <vcpu_id> - Register a vCPU\n"
+             "  unregister_vcpu <tid>              - Unregister a vCPU\n"
+             "  query_vcpu <tid>                   - Query vCPU registration "
+             "status\n"
+             "  shutdown                           - Shutdown the scheduler\n"
+             "  help                               - Show this help message\n");
   } else {
     snprintf(response, sizeof(response),
              "ERROR: Unknown command. Type 'help' for available commands.\n");
@@ -292,6 +434,8 @@ restart:
 
     read_stats(skel, stats);
     printf("local=%llu global=%llu\n", stats[0], stats[1]);
+    print_registered_vcpus(skel);
+    printf("\n");
     fflush(stdout);
     sleep(1);
   }

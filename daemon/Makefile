@@ -82,7 +82,7 @@ $(OBJ_DIR)/$(TARGET): $(SRC_DIR)/main.c $(DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS) -I$(OBJ_DIR)
 
-$(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o: $(SRC_DIR)/scx_ossim/scx_ossim.bpf.c $(SRC_DIR)/scx_ossim/interface.h $(SCX_SRC_DIR)/Makefile.md
+$(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o: $(SRC_DIR)/scx_ossim/scx_ossim.bpf.c $(SRC_DIR)/scx_ossim/interface.h $(SCX_SRC_DIR)/
 	@echo "Compiling BPF: $< -> $@"
 	@mkdir -p $(dir $@)
 	$(BPF_CLANG) $(BPF_CFLAGS) -target bpf $(BPF_INCLUDES) -c $< -o $@
@@ -92,6 +92,7 @@ $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h: $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o
 	@mkdir -p $(dir $@)
 	$(BPFTOOL) gen skeleton $< name $(basename $(basename $(notdir $<))) > $@
 
+.PRECIOUS: $(SCX_SRC_DIR)/ $(SCX_SRC_DIR)/Makefile.md
 $(SCX_SRC_DIR)/Makefile.md:
 	rm -rf $(dir $@)
 	git clone https://github.com/sched-ext/scx.git --branch v$(SCX_VERSION) $(dir $@)

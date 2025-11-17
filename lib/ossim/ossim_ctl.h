@@ -99,17 +99,34 @@ int ossim_ctl_send_command(struct ossim_ctl *ctl, const char *command,
                            char *response, size_t response_size);
 
 /**
- * ossim_ctl_register_vcpu - Register a vCPU thread (future use)
+ * ossim_ctl_register_vcpu - Register a vCPU thread
  * @ctl: Connection handle
  * @vcpu: vCPU registration data
  *
  * Returns: OSSIM_OK on success, negative error code on failure
- *
- * Note: This function is reserved for future use when the scheduler
- * supports vCPU registration via the RPC interface.
  */
 int ossim_ctl_register_vcpu(struct ossim_ctl *ctl,
                             struct ossim_ctl_vcpu_registration *vcpu);
+
+/**
+ * ossim_ctl_unregister_vcpu - Unregister a vCPU thread
+ * @ctl: Connection handle
+ * @tid: Thread ID of the vCPU to unregister
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_unregister_vcpu(struct ossim_ctl *ctl, pid_t tid);
+
+/**
+ * ossim_ctl_query_vcpu - Query vCPU registration status
+ * @ctl: Connection handle
+ * @tid: Thread ID of the vCPU to query
+ * @metadata: Output buffer for vCPU metadata
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_query_vcpu(struct ossim_ctl *ctl, pid_t tid,
+                         struct ossim_vcpu_metadata *metadata);
 
 /**
  * ossim_strerror - Get error message for error code
