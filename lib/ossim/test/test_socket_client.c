@@ -1,65 +1,85 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Unix socket client for testing scx_ossim scheduler
+ * Uses libossim for communication
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <errno.h>
 
-#define SOCKET_PATH "/tmp/scx_ossim.sock"
-#define BUFFER_SIZE 1024
+#include "ossim/ossim_ctl.h"
 
 /* Send a command to the server and print the response */
 static int send_command(const char *command) {
-	int sock_fd;
-	struct sockaddr_un addr;
-	char buffer[BUFFER_SIZE];
-	ssize_t bytes;
+	struct ossim_ctl *ctl;
+	char response[256];
+	int ret;
 
-	/* Create stream socket */
-	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (sock_fd < 0) {
-		perror("socket");
-		return -1;
-	}
-
-	/* Connect to server */
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
-
-	if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-		perror("connect");
+	/* Connect to scheduler */
+	ctl = ossim_ctl_connect(NULL);
+	if (!ctl) {
+		fprintf(stderr, "Failed to connect: %s\n", strerror(errno));
 		fprintf(stderr, "Make sure scx_ossim is running\n");
-		close(sock_fd);
 		return -1;
 	}
 
-	/* Send command */
-	if (write(sock_fd, command, strlen(command)) < 0) {
-		perror("write");
-		close(sock_fd);
-		return -1;
+	/* Handle common commands with typed API */
+	if (strcmp(command, "stats") == 0) {
+		struct ossim_stats stats;
+		ret = ossim_ctl_get_stats(ctl, &stats);
+		if (ret == OSSIM_OK) {
+			printf("local=%lu global=%lu\n",
+			       stats.local_enqueues, stats.global_enqueues);
+		} else {
+			fprintf(stderr, "Failed to get stats: %s\n", ossim_strerror(ret));
+			ossim_ctl_disconnect(ctl);
+			return -1;
+		}
+	} else if (strcmp(command, "local") == 0) {
+		uint64_t count;
+		ret = ossim_ctl_get_local_enqueues(ctl, &count);
+		if (ret == OSSIM_OK) {
+			printf("%lu\n", count);
+		} else {
+			fprintf(stderr, "Failed to get local count: %s\n", ossim_strerror(ret));
+			ossim_ctl_disconnect(ctl);
+			return -1;
+		}
+	} else if (strcmp(command, "global") == 0) {
+		uint64_t count;
+		ret = ossim_ctl_get_global_enqueues(ctl, &count);
+		if (ret == OSSIM_OK) {
+			printf("%lu\n", count);
+		} else {
+			fprintf(stderr, "Failed to get global count: %s\n", ossim_strerror(ret));
+			ossim_ctl_disconnect(ctl);
+			return -1;
+		}
+	} else if (strcmp(command, "shutdown") == 0) {
+		ret = ossim_ctl_shutdown(ctl);
+		if (ret == OSSIM_OK) {
+			printf("OK\n");
+		} else {
+			fprintf(stderr, "Failed to shutdown: %s\n", ossim_strerror(ret));
+			ossim_ctl_disconnect(ctl);
+			return -1;
+		}
+	} else {
+		/* Use raw command API for other commands */
+		ret = ossim_ctl_send_command(ctl, command, response, sizeof(response));
+		if (ret == OSSIM_OK) {
+			printf("%s\n", response);
+		} else {
+			fprintf(stderr, "Failed to send command: %s\n", ossim_strerror(ret));
+			ossim_ctl_disconnect(ctl);
+			return -1;
+		}
 	}
 
-	/* Read response */
-	bytes = read(sock_fd, buffer, sizeof(buffer) - 1);
-	if (bytes < 0) {
-		perror("read");
-		close(sock_fd);
-		return -1;
-	}
-
-	buffer[bytes] = '\0';
-	printf("%s", buffer);
-
-	/* Close connection */
-	close(sock_fd);
+	ossim_ctl_disconnect(ctl);
 	return 0;
 }
 
@@ -140,14 +160,13 @@ static void print_usage(const char *prog_name) {
 
 int main(int argc, char **argv) {
 	int opt;
-	int interactive = 0;
 	int monitor_interval = 0;
 
 	/* Parse options */
 	while ((opt = getopt(argc, argv, "im:h")) != -1) {
 		switch (opt) {
 		case 'i':
-			interactive = 1;
+			/* Interactive mode - this is the default, so just continue */
 			break;
 		case 'm':
 			monitor_interval = atoi(optarg);
