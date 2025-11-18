@@ -1,37 +1,13 @@
 #ifndef OSSIM_OSSIM_CTL_H
 #define OSSIM_OSSIM_CTL_H
 
-/*
- * User APIs to interact with scx_ossim scheduler daemon.
- *
- * This library provides a simple interface to communicate with the
- * scx_ossim scheduler via UNIX domain sockets. It wraps the RPC protocol
- * and provides type-safe functions for common operations.
- *
- * Example usage:
- *   struct ossim_ctl *ctl = ossim_ctl_connect(NULL);
- *   if (!ctl) {
- *     // handle error
- *   }
- *
- *   struct ossim_stats stats;
- *   int ret = ossim_ctl_get_stats(ctl, &stats);
- *   if (ret == OSSIM_OK) {
- *     printf("Local: %lu, Global: %lu\n",
- *            stats.local_enqueues, stats.global_enqueues);
- *   }
- *
- *   ossim_ctl_disconnect(ctl);
- */
-
-#include "ossim/types.h"
 #include "ossim/config.h"
+#include "ossim/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Opaque connection handle */
 struct ossim_ctl;
 
 /**
@@ -82,21 +58,6 @@ int ossim_ctl_get_global_enqueues(struct ossim_ctl *ctl, uint64_t *count);
  * Returns: OSSIM_OK on success, negative error code on failure
  */
 int ossim_ctl_shutdown(struct ossim_ctl *ctl);
-
-/**
- * ossim_ctl_send_command - Send a raw command to the scheduler
- * @ctl: Connection handle
- * @command: Command string to send
- * @response: Buffer for response (can be NULL if not needed)
- * @response_size: Size of response buffer
- *
- * Returns: OSSIM_OK on success, negative error code on failure
- *
- * This is a low-level function for extensibility. Most users should use
- * the typed functions above.
- */
-int ossim_ctl_send_command(struct ossim_ctl *ctl, const char *command,
-                           char *response, size_t response_size);
 
 /**
  * ossim_ctl_register_vcpu - Register a vCPU thread

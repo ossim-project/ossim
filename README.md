@@ -6,7 +6,7 @@ Please check `docs/ossim.pdf` for an overview of the project's vision.
 
 Prerequisites:
 
-- X86 machine with Ubuntu 24.04
+- X86 machine with Ubuntu 25.10
 - KVM is available
 - `sudo` is enabled for the current user
 
@@ -25,8 +25,9 @@ Steps:
     export LIBRARY_PATH=${OSSIM_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
     export CPATH=${OSSIM_PREFIX}/include${CPATH:+:$CPATH}
     export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+
     ```
-    You may want to persist these changes in your `.bashrc` file.
+    You may want to persist these changes in `/etc/profile.d/ossim.sh`, so that it can be also seem by `sudo -i`. (`sudo -E` is not currently supported by `sudo-rs`, which is the default in Ubuntu 25.10.)
 
 2. Install dependencies:
 
@@ -35,6 +36,9 @@ Steps:
     ```
 
     This may take more than 10 minutes because it builds some dependencies (e.g., gRPC) from source.
+
+    Optionally, you can configure `GRPC_CXXFLAGS` and `GRPC_LDFLAGS` environment variables (e.g., also in `/etc/profile.d/ossim.sh`) to save build time (it takes some time `pkg-config` to work with gRPC).
+    You can initialize the variables by copying the output from `pkg-config --cflags grpc++ protobuf` and `pkg-config --libs grpc++ protobuf` respectively.
 
 3. Add the current user to related groups and relogin:
 

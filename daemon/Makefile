@@ -66,21 +66,68 @@ export BPF_INCLUDES := -I$(SCX_SRC_DIR)/scheds/include \
 	$(LIBBPF_CFLAGS)
 
 export CFLAGS := -std=gnu11 -I$(SCX_SRC_DIR)/scheds/include -I$(SCX_SRC_DIR)/scheds/vmlinux -I$(SRC_DIR) -I$(OBJ_DIR) $(LIBBPF_CFLAGS)
+export CXXFLAGS := -std=c++17 -fpermissive -Wno-write-strings -I$(SCX_SRC_DIR)/scheds/include -I$(SCX_SRC_DIR)/scheds/vmlinux -I$(SRC_DIR) -I$(OBJ_DIR) $(LIBBPF_CFLAGS)
 
 export LIBBPF_DEPS := $(LIBBPF_LIBS) -lelf -lz -lzstd
 export THREAD_DEPS := -lpthread
 
-# Scheduler lists for convenience targets
+# Manually specify grpc/protobuf flags because pkg-config takes a long time
+GRPC_CXXFLAGS ?= $(shell pkg-config --cflags grpc++ protobuf)
+GRPC_LDFLAGS ?= $(shell pkg-config --libs grpc++ protobuf)
 
 TARGET := ossimd
 
 all: $(OBJ_DIR)/$(TARGET)
 
-DEPS := $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h $(SRC_DIR)/scx_ossim/interface.h
 
-$(OBJ_DIR)/$(TARGET): $(SRC_DIR)/main.c $(DEPS)
+PROTO_DEPS := $(OBJ_DIR)/ossim_rpc.pb.o $(OBJ_DIR)/ossim_rpc.grpc.pb.o
+
+# Proto file location in shared lib directory
+PROTO_DIR := $(SRC_DIR)/../lib/ossim
+PROTO_FILE := $(PROTO_DIR)/ossim_rpc.proto
+
+LIB_DIR := $(SRC_DIR)/../lib
+LIB_DEPS := $(shell ls $(LIB_DIR)/ossim/*.h)
+LIB_INCLUDES := -I$(LIB_DIR)
+SCX_DEPS := $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h $(SRC_DIR)/scx_ossim/interface.h
+SCX_INCLUDES := -I$(OBJ_DIR)
+GRPC_DEPS := $(OBJ_DIR)/ossim_rpc.pb.h $(OBJ_DIR)/ossim_rpc.grpc.pb.h
+GRPC_INCLUDES := -I$(OBJ_DIR)
+
+DEPS := $(SCX_DEPS) $(LIB_DEPS) $(GRPC_DEPS)
+INCLUDES := $(LIB_INCLUDES) $(SCX_INCLUDES) $(GRPC_INCLUDES)
+
+# Generate protobuf and gRPC source files
+$(OBJ_DIR)/ossim_rpc.pb.cc $(OBJ_DIR)/ossim_rpc.pb.h: $(PROTO_FILE)
+	@echo "Generating protobuf code: $< -> $(OBJ_DIR)/"
+	@mkdir -p $(OBJ_DIR)
+	protoc --cpp_out=$(OBJ_DIR) --proto_path=$(PROTO_DIR) ossim_rpc.proto
+
+$(OBJ_DIR)/ossim_rpc.grpc.pb.cc $(OBJ_DIR)/ossim_rpc.grpc.pb.h: $(PROTO_FILE)
+	@echo "Generating gRPC code: $< -> $(OBJ_DIR)/"
+	@mkdir -p $(OBJ_DIR)
+	protoc --grpc_out=$(OBJ_DIR) --plugin=protoc-gen-grpc=`which grpc_cpp_plugin` --proto_path=$(PROTO_DIR) ossim_rpc.proto
+
+# Compile protobuf object
+$(OBJ_DIR)/ossim_rpc.pb.o: $(OBJ_DIR)/ossim_rpc.pb.cc
+	@echo "Compiling protobuf: $<"
+	$(CXX) $(CXXFLAGS) $(GRPC_CXXFLAGS) -c $< -o $@
+
+# Compile gRPC object
+$(OBJ_DIR)/ossim_rpc.grpc.pb.o: $(OBJ_DIR)/ossim_rpc.grpc.pb.cc
+	@echo "Compiling gRPC: $<"
+	$(CXX) $(CXXFLAGS) $(GRPC_CXXFLAGS) -c $< -o $@
+
+# Compile main C++ file
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.cpp $(DEPS)
+	@echo "Compiling main: $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $< -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS) -I$(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(GRPC_CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/$(TARGET): $(OBJ_DIR)/main.o $(PROTO_DEPS)
+	@echo "Linking: $@"
+	@mkdir -p $(dir $@)
+	$(CXX) $^ -o $@ $(LIBBPF_DEPS) $(THREAD_DEPS) $(GRPC_LDFLAGS)
 
 $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o: $(SRC_DIR)/scx_ossim/scx_ossim.bpf.c $(SRC_DIR)/scx_ossim/interface.h $(SCX_SRC_DIR)/
 	@echo "Compiling BPF: $< -> $@"
@@ -92,18 +139,21 @@ $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.skel.h: $(OBJ_DIR)/scx_ossim/scx_ossim.bpf.o
 	@mkdir -p $(dir $@)
 	$(BPFTOOL) gen skeleton $< name $(basename $(basename $(notdir $<))) > $@
 
-.PRECIOUS: $(SCX_SRC_DIR)/ $(SCX_SRC_DIR)/Makefile.md
-$(SCX_SRC_DIR)/Makefile.md:
+.PRECIOUS: $(SCX_SRC_DIR)/
+$(SCX_SRC_DIR)/:
 	rm -rf $(dir $@)
 	git clone https://github.com/sched-ext/scx.git --branch v$(SCX_VERSION) $(dir $@)
 
+# sudo-rs (default in Ubuntu 25.04) does not support `sudo -E`. We use sudo -i to source `/etc/profile` for environment variables.
 run: $(OBJ_DIR)/$(TARGET)
-	sudo $<
+	sudo -i $<
 
 clean:
-	rm -f $(OBJ_DIR)/*.bpf.o $(OBJ_DIR)/*.bpf.skel.h $(OBJ_DIR)/*.l1o $(OBJ_DIR)/*.l2o $(OBJ_DIR)/*.l3o $(OBJ_DIR)/$(TARGET)
-	rm -rf $(OBJ_DIR)/scx/
+	rm -rf $(filter-out $(SCX_SRC_DIR),$(wildcard $(OBJ_DIR)/*))
 
-.PHONY: all clean run
+clean-all:
+	rm -rf $(wildcard $(OBJ_DIR)/*)
+
+.PHONY: all run clean clean-all
 
 endif  # End of ifeq ($(skip-makefile),)
