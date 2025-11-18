@@ -42,11 +42,13 @@ git clone --depth 1 --recurse-submodules --shallow-submodules -b ${GRPC_BRANCH} 
 echo "Building gRPC in ${GRPC_SRC}"
 mkdir -p ${GRPC_SRC}/build
 pushd ${GRPC_SRC}/build
-cmake -DgRPC_INSTALL=ON \
+cmake -DBUILD_SHARED_LIBS=ON \
       -DgRPC_BUILD_TESTS=OFF \
+      -DgRPC_SSL_PROVIDER=package \
       -DgRPC_ZLIB_PROVIDER=package \
       -DCMAKE_CXX_STANDARD=17 \
       -DCMAKE_BUILD_TYPE=Release \
+      -DgRPC_INSTALL=ON \
       -DCMAKE_INSTALL_PREFIX=${PREFIX} \
       ..
 make -j$(nproc)

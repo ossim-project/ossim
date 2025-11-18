@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package ossim;
+
+// Statistics message
+message Stats {
+  uint64 local_enqueues = 1;
+  uint64 global_enqueues = 2;
+}
+
+// vCPU registration request
+message RegisterVcpuRequest {
+  int32 tid = 1;
+  uint32 vm_id = 2;
+  uint32 vcpu_id = 3;
+}
+
+// vCPU registration response
+message RegisterVcpuResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// vCPU unregistration request
+message UnregisterVcpuRequest {
+  int32 tid = 1;
+}
+
+// vCPU unregistration response
+message UnregisterVcpuResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// vCPU query request
+message QueryVcpuRequest {
+  int32 tid = 1;
+}
+
+// vCPU metadata
+message VcpuMetadata {
+  int32 tid = 1;
+  uint32 vm_id = 2;
+  uint32 vcpu_id = 3;
+  uint64 timestamp = 4;
+}
+
+// vCPU query response
+message QueryVcpuResponse {
+  bool success = 1;
+  string message = 2;
+  VcpuMetadata metadata = 3;
+}
+
+// Shutdown request
+message ShutdownRequest {}
+
+// Shutdown response
+message ShutdownResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Empty request for getting stats
+message GetStatsRequest {}
+
+// OssimScheduler service definition
+service OssimScheduler {
+  // Get scheduler statistics
+  rpc GetStats(GetStatsRequest) returns (Stats);
+
+  // Register a vCPU
+  rpc RegisterVcpu(RegisterVcpuRequest) returns (RegisterVcpuResponse);
+
+  // Unregister a vCPU
+  rpc UnregisterVcpu(UnregisterVcpuRequest) returns (UnregisterVcpuResponse);
+
+  // Query vCPU registration status
+  rpc QueryVcpu(QueryVcpuRequest) returns (QueryVcpuResponse);
+
+  // Shutdown the scheduler
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}

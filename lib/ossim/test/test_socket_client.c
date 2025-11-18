@@ -1,8 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Unix socket client for testing scx_ossim scheduler
- * Uses libossim for communication
- */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +10,6 @@
 /* Send a command to the server and print the response */
 static int send_command(const char *command) {
   struct ossim_ctl *ctl;
-  char response[256];
   int ret;
 
   /* Connect to scheduler */
@@ -113,16 +107,23 @@ static int send_command(const char *command) {
       ossim_ctl_disconnect(ctl);
       return -1;
     }
+  } else if (strcmp(command, "help") == 0) {
+    printf("Available commands:\n");
+    printf("  stats                              Get both local and global "
+           "enqueue counts\n");
+    printf("  local                              Get local enqueue count\n");
+    printf("  global                             Get global enqueue count\n");
+    printf("  register_vcpu <tid> <vm_id> <vcpu_id>  Register a vCPU\n");
+    printf("  unregister_vcpu <tid>              Unregister a vCPU\n");
+    printf("  query_vcpu <tid>                   Query vCPU registration "
+           "status\n");
+    printf("  shutdown                           Shutdown the scheduler\n");
+    printf("  help                               Show this help message\n");
   } else {
-    /* Use raw command API for other commands */
-    ret = ossim_ctl_send_command(ctl, command, response, sizeof(response));
-    if (ret == OSSIM_OK) {
-      printf("%s\n", response);
-    } else {
-      fprintf(stderr, "Failed to send command: %s\n", ossim_strerror(ret));
-      ossim_ctl_disconnect(ctl);
-      return -1;
-    }
+    fprintf(stderr, "Unknown command: %s\n", command);
+    fprintf(stderr, "Type 'help' for available commands\n");
+    ossim_ctl_disconnect(ctl);
+    return -1;
   }
 
   ossim_ctl_disconnect(ctl);
