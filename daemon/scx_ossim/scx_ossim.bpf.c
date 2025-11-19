@@ -34,16 +34,16 @@ struct {
 /* Unified FIFO queue for all pending events */
 struct {
   __uint(type, BPF_MAP_TYPE_QUEUE);
-  __uint(max_entries, OSSIM_MAX_PENDING_EVENTS);
-  __type(value, struct ossim_event);
+  __uint(max_entries, SCX_OSSIM_MAX_PENDING_EVENTS);
+  __type(value, struct scx_ossim_event);
 } event_queue SEC(".maps");
 
 /* Hash map storing registered vCPUs (key: TID, value: metadata) */
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, OSSIM_MAX_VCPUS);
+  __uint(max_entries, SCX_OSSIM_MAX_VCPUS);
   __type(key, pid_t);
-  __type(value, struct ossim_bpf_vcpu_metadata);
+  __type(value, struct scx_ossim_vcpu_metadata);
 } vcpu_registry SEC(".maps");
 
 /* Global coordination list (single entry, key = 0) */
@@ -51,7 +51,7 @@ struct {
   __uint(type, BPF_MAP_TYPE_ARRAY);
   __uint(max_entries, 1);
   __type(key, __u32);
-  __type(value, struct ossim_coord_list);
+  __type(value, struct scx_ossim_coord_list);
 } global_coord_list SEC(".maps");
 
 static void stat_inc(u32 idx) {
@@ -65,47 +65,48 @@ static void stat_inc(u32 idx) {
  * TODO: Consider whether we need to protect each coordination list
  * with a spinlock.
  */
-static void coord_list_add(struct ossim_coord_list *list, pid_t tid) {
-  if (!list || list->count >= OSSIM_MAX_COORD_VCPUS)
+static void coord_list_add(struct scx_ossim_coord_list *list, pid_t tid) {
+  if (!list || list->count >= SCX_OSSIM_MAX_COORD_VCPUS)
     return;
 
   /* Check if already in list */
   __u32 count = list->count;
-  if (count > OSSIM_MAX_COORD_VCPUS)
-    count = OSSIM_MAX_COORD_VCPUS;
+  if (count > SCX_OSSIM_MAX_COORD_VCPUS)
+    count = SCX_OSSIM_MAX_COORD_VCPUS;
 
   for (__u32 j = 0; j < count; j++) {
-    if (j >= OSSIM_MAX_COORD_VCPUS)
+    if (j >= SCX_OSSIM_MAX_COORD_VCPUS)
       break;
     if (list->tids[j] == tid)
       return; /* Already exists */
   }
 
   /* Add to list */
-  if (list->count < OSSIM_MAX_COORD_VCPUS) {
+  if (list->count < SCX_OSSIM_MAX_COORD_VCPUS) {
     list->tids[list->count] = tid;
     list->count++;
   }
 }
 
-static void coord_list_remove(struct ossim_coord_list *list, pid_t tid) {
-  if (!list || list->count > OSSIM_MAX_COORD_VCPUS)
+static void coord_list_remove(struct scx_ossim_coord_list *list, pid_t tid) {
+  if (!list || list->count > SCX_OSSIM_MAX_COORD_VCPUS)
     return;
 
   __u32 count = list->count;
-  if (count > OSSIM_MAX_COORD_VCPUS)
-    count = OSSIM_MAX_COORD_VCPUS;
+  if (count > SCX_OSSIM_MAX_COORD_VCPUS)
+    count = SCX_OSSIM_MAX_COORD_VCPUS;
 
   for (__u32 j = 0; j < count; j++) {
-    if (j >= OSSIM_MAX_COORD_VCPUS)
+    if (j >= SCX_OSSIM_MAX_COORD_VCPUS)
       break;
     if (list->tids[j] == tid) {
       /* Shift remaining elements */
       __u32 shift_count = count - 1;
-      if (shift_count > OSSIM_MAX_COORD_VCPUS - 1)
-        shift_count = OSSIM_MAX_COORD_VCPUS - 1;
+      if (shift_count > SCX_OSSIM_MAX_COORD_VCPUS - 1)
+        shift_count = SCX_OSSIM_MAX_COORD_VCPUS - 1;
       for (__u32 k = j; k < shift_count; k++) {
-        if (k >= OSSIM_MAX_COORD_VCPUS - 1 || k + 1 >= OSSIM_MAX_COORD_VCPUS)
+        if (k >= SCX_OSSIM_MAX_COORD_VCPUS - 1 ||
+            k + 1 >= SCX_OSSIM_MAX_COORD_VCPUS)
           break;
         list->tids[k] = list->tids[k + 1];
       }
@@ -117,7 +118,7 @@ static void coord_list_remove(struct ossim_coord_list *list, pid_t tid) {
 
 /* Process pending events from the unified queue */
 static void process_events(void) {
-  struct ossim_event event;
+  struct scx_ossim_event event;
   int ret;
 
   /* Process up to 32 events per call to avoid hogging CPU */
@@ -128,9 +129,9 @@ static void process_events(void) {
       break;
     }
 
-    if (event.event_type == OSSIM_EVENT_VCPU_REGISTER) {
+    if (event.event_type == SCX_OSSIM_EVENT_VCPU_REGISTER) {
       /* Register vCPU */
-      struct ossim_bpf_vcpu_metadata metadata = {
+      struct scx_ossim_vcpu_metadata metadata = {
           .tid = event.vcpu_reg.tid,
           .vm_id = event.vcpu_reg.vm_id,
           .vcpu_id = event.vcpu_reg.vcpu_id,
@@ -142,69 +143,69 @@ static void process_events(void) {
 
       /* Now, we add all vCPUs to the global coordination list */
       __u32 key = 0;
-      struct ossim_coord_list *global_list;
+      struct scx_ossim_coord_list *global_list;
       global_list = bpf_map_lookup_elem(&global_coord_list, &key);
       if (global_list) {
         coord_list_add(global_list, event.vcpu_reg.tid);
       }
-    } else if (event.event_type == OSSIM_EVENT_VCPU_UNREGISTER) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_VCPU_UNREGISTER) {
       /* Unregister vCPU */
       bpf_map_delete_elem(&vcpu_registry, &event.vcpu_unreg.tid);
 
       /* Remove from global coordination list */
       __u32 key = 0;
-      struct ossim_coord_list *global_list;
+      struct scx_ossim_coord_list *global_list;
       global_list = bpf_map_lookup_elem(&global_coord_list, &key);
       if (global_list) {
         coord_list_remove(global_list, event.vcpu_unreg.tid);
       }
 
-    } else if (event.event_type == OSSIM_EVENT_COORD_ADD) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_COORD_ADD) {
       /* Add vCPU to another vCPU's coordination list */
-      struct ossim_bpf_vcpu_metadata *metadata;
+      struct scx_ossim_vcpu_metadata *metadata;
       metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
       if (metadata) {
         coord_list_add(&metadata->coord_list, event.coord_op.related_tid);
       }
 
-    } else if (event.event_type == OSSIM_EVENT_COORD_REMOVE) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_COORD_REMOVE) {
       /* Remove vCPU from coordination list */
-      struct ossim_bpf_vcpu_metadata *metadata;
+      struct scx_ossim_vcpu_metadata *metadata;
       metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
       if (metadata) {
         coord_list_remove(&metadata->coord_list, event.coord_op.related_tid);
       }
 
-    } else if (event.event_type == OSSIM_EVENT_COORD_CLEAR) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_COORD_CLEAR) {
       /* Clear coordination list */
-      struct ossim_bpf_vcpu_metadata *metadata;
+      struct scx_ossim_vcpu_metadata *metadata;
       metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
       if (metadata) {
         metadata->coord_list.count = 0;
       }
 
-    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_ADD) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_GLOBAL_COORD_ADD) {
       /* Add TID to global coordination list */
       __u32 key = 0;
-      struct ossim_coord_list *global_list;
+      struct scx_ossim_coord_list *global_list;
       global_list = bpf_map_lookup_elem(&global_coord_list, &key);
       if (global_list) {
         coord_list_add(global_list, event.global_coord.tid);
       }
 
-    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_REMOVE) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_GLOBAL_COORD_REMOVE) {
       /* Remove TID from global coordination list */
       __u32 key = 0;
-      struct ossim_coord_list *global_list;
+      struct scx_ossim_coord_list *global_list;
       global_list = bpf_map_lookup_elem(&global_coord_list, &key);
       if (global_list) {
         coord_list_remove(global_list, event.global_coord.tid);
       }
 
-    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_CLEAR) {
+    } else if (event.event_type == SCX_OSSIM_EVENT_GLOBAL_COORD_CLEAR) {
       /* Clear global coordination list */
       __u32 key = 0;
-      struct ossim_coord_list *global_list;
+      struct scx_ossim_coord_list *global_list;
       global_list = bpf_map_lookup_elem(&global_coord_list, &key);
       if (global_list) {
         global_list->count = 0;
@@ -325,7 +326,7 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
 
 void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p) {
   pid_t tid = p->pid;
-  struct ossim_bpf_vcpu_metadata *metadata;
+  struct scx_ossim_vcpu_metadata *metadata;
 
   /* Check if this task is a registered vCPU */
   metadata = bpf_map_lookup_elem(&vcpu_registry, &tid);
@@ -334,7 +335,7 @@ void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p) {
 
   /* Remove from the global coordination list */
   __u32 key = 0;
-  struct ossim_coord_list *global_list;
+  struct scx_ossim_coord_list *global_list;
   global_list = bpf_map_lookup_elem(&global_coord_list, &key);
   if (global_list) {
     coord_list_remove(global_list, tid);
@@ -351,7 +352,7 @@ void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p) {
 s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init) {
   s32 ret;
   __u32 key = 0;
-  struct ossim_coord_list empty_list = {.count = 0};
+  struct scx_ossim_coord_list empty_list = {.count = 0};
 
   ret = scx_bpf_create_dsq(VCPU_DSQ, -1);
   if (ret)

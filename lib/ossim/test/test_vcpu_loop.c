@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 
 #include "ossim/ossim_ctl.h"
 
@@ -38,8 +38,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  printf("Registered as vCPU (tid=%d, vm_id=%u, vcpu_id=%u)\n",
-         vcpu.vcpu_tid, vcpu.vm_id, vcpu.vcpu_id);
+  printf("Registered as vCPU (tid=%d, vm_id=%u, vcpu_id=%u)\n", vcpu.vcpu_tid,
+         vcpu.vm_id, vcpu.vcpu_id);
 
   /* Disconnect - registration persists */
   ossim_ctl_disconnect(ctl);

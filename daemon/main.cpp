@@ -78,7 +78,7 @@ static void read_stats(struct scx_ossim *skel, __u64 *stats) {
 /* Print registered vCPUs */
 static void print_registered_vcpus(struct scx_ossim *skel) {
   pid_t key, next_key;
-  struct ossim_bpf_vcpu_metadata metadata;
+  struct scx_ossim_vcpu_metadata metadata;
   int count = 0;
   int map_fd = bpf_map__fd(skel->maps.vcpu_registry);
 
@@ -104,8 +104,8 @@ static void print_registered_vcpus(struct scx_ossim *skel) {
 /* Register a vCPU by pushing an event to the queue */
 static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
                          __u32 vcpu_id) {
-  struct ossim_event event = {
-      .event_type = OSSIM_EVENT_VCPU_REGISTER,
+  struct scx_ossim_event event = {
+      .event_type = SCX_OSSIM_EVENT_VCPU_REGISTER,
       .vcpu_reg =
           {
               .tid = tid,
@@ -132,8 +132,8 @@ static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
 
 /* Unregister a vCPU by pushing an event to the queue */
 static int unregister_vcpu(struct scx_ossim *skel, pid_t tid) {
-  struct ossim_event event = {
-      .event_type = OSSIM_EVENT_VCPU_UNREGISTER,
+  struct scx_ossim_event event = {
+      .event_type = SCX_OSSIM_EVENT_VCPU_UNREGISTER,
       .vcpu_unreg =
           {
               .tid = tid,
@@ -157,7 +157,7 @@ static int unregister_vcpu(struct scx_ossim *skel, pid_t tid) {
 
 /* Query vCPU registration status */
 static int query_vcpu(struct scx_ossim *skel, pid_t tid,
-                      struct ossim_bpf_vcpu_metadata *metadata) {
+                      struct scx_ossim_vcpu_metadata *metadata) {
   int ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.vcpu_registry), &tid,
                                 metadata);
   return ret;
@@ -218,7 +218,7 @@ public:
   grpc::Status QueryVcpu(grpc::ServerContext *context,
                          const ossim::QueryVcpuRequest *request,
                          ossim::QueryVcpuResponse *response) override {
-    struct ossim_bpf_vcpu_metadata metadata;
+    struct scx_ossim_vcpu_metadata metadata;
     int ret = query_vcpu(skel_, request->tid(), &metadata);
     if (ret == 0) {
       response->set_success(true);
@@ -243,8 +243,8 @@ public:
   AddCoordination(grpc::ServerContext *context,
                   const ossim::AddCoordinationRequest *request,
                   ossim::AddCoordinationResponse *response) override {
-    struct ossim_event event = {
-        .event_type = OSSIM_EVENT_COORD_ADD,
+    struct scx_ossim_event event = {
+        .event_type = SCX_OSSIM_EVENT_COORD_ADD,
         .coord_op =
             {
                 .vcpu_tid = request->vcpu_tid(),
@@ -270,8 +270,8 @@ public:
   RemoveCoordination(grpc::ServerContext *context,
                      const ossim::RemoveCoordinationRequest *request,
                      ossim::RemoveCoordinationResponse *response) override {
-    struct ossim_event event = {
-        .event_type = OSSIM_EVENT_COORD_REMOVE,
+    struct scx_ossim_event event = {
+        .event_type = SCX_OSSIM_EVENT_COORD_REMOVE,
         .coord_op =
             {
                 .vcpu_tid = request->vcpu_tid(),
@@ -301,15 +301,15 @@ public:
     int queue_fd = bpf_map__fd(skel_->maps.event_queue);
 
     // Check if the new coordination list is too large
-    if (request->related_tids_size() > OSSIM_MAX_COORD_VCPUS) {
+    if (request->related_tids_size() > SCX_OSSIM_MAX_COORD_VCPUS) {
       response->set_success(false);
       response->set_message("Coordination list exceeds maximum size");
       return grpc::Status::OK;
     }
 
     // First, push a CLEAR event
-    struct ossim_event clear_event = {
-        .event_type = OSSIM_EVENT_COORD_CLEAR,
+    struct scx_ossim_event clear_event = {
+        .event_type = SCX_OSSIM_EVENT_COORD_CLEAR,
         .coord_op =
             {
                 .vcpu_tid = vcpu_tid,
@@ -326,8 +326,8 @@ public:
 
     // Then, push ADD events for each TID in the new list
     for (int i = 0; i < request->related_tids_size(); i++) {
-      struct ossim_event add_event = {
-          .event_type = OSSIM_EVENT_COORD_ADD,
+      struct scx_ossim_event add_event = {
+          .event_type = SCX_OSSIM_EVENT_COORD_ADD,
           .coord_op =
               {
                   .vcpu_tid = vcpu_tid,
@@ -352,7 +352,7 @@ public:
       grpc::ServerContext *context,
       const ossim::GetGlobalCoordinationListRequest *request,
       ossim::GetGlobalCoordinationListResponse *response) override {
-    struct ossim_coord_list coord_list;
+    struct scx_ossim_coord_list coord_list;
     __u32 key = 0;
     int map_fd = bpf_map__fd(skel_->maps.global_coord_list);
 
@@ -378,8 +378,8 @@ public:
       grpc::ServerContext *context,
       const ossim::AddGlobalCoordinationRequest *request,
       ossim::AddGlobalCoordinationResponse *response) override {
-    struct ossim_event event = {
-        .event_type = OSSIM_EVENT_GLOBAL_COORD_ADD,
+    struct scx_ossim_event event = {
+        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_ADD,
         .global_coord =
             {
                 .tid = request->tid(),
@@ -404,8 +404,8 @@ public:
       grpc::ServerContext *context,
       const ossim::RemoveGlobalCoordinationRequest *request,
       ossim::RemoveGlobalCoordinationResponse *response) override {
-    struct ossim_event event = {
-        .event_type = OSSIM_EVENT_GLOBAL_COORD_REMOVE,
+    struct scx_ossim_event event = {
+        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_REMOVE,
         .global_coord =
             {
                 .tid = request->tid(),
@@ -433,15 +433,15 @@ public:
     int queue_fd = bpf_map__fd(skel_->maps.event_queue);
 
     // Check if the list is too large
-    if (request->tids_size() > OSSIM_MAX_COORD_VCPUS) {
+    if (request->tids_size() > SCX_OSSIM_MAX_COORD_VCPUS) {
       response->set_success(false);
       response->set_message("Global coordination list exceeds maximum size");
       return grpc::Status::OK;
     }
 
     // First, push a CLEAR event
-    struct ossim_event clear_event = {
-        .event_type = OSSIM_EVENT_GLOBAL_COORD_CLEAR,
+    struct scx_ossim_event clear_event = {
+        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_CLEAR,
         .global_coord =
             {
                 .tid = 0,
@@ -457,8 +457,8 @@ public:
 
     // Then, push ADD events for each TID in the new list
     for (int i = 0; i < request->tids_size(); i++) {
-      struct ossim_event add_event = {
-          .event_type = OSSIM_EVENT_GLOBAL_COORD_ADD,
+      struct scx_ossim_event add_event = {
+          .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_ADD,
           .global_coord =
               {
                   .tid = request->tids(i),
