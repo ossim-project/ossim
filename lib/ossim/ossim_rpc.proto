@@ -45,6 +45,8 @@ message VcpuMetadata {
   uint32 vm_id = 2;
   uint32 vcpu_id = 3;
   uint64 timestamp = 4;
+  uint32 coord_count = 5;
+  repeated int32 coord_vcpus = 6;
 }
 
 // vCPU query response
@@ -59,6 +61,78 @@ message ShutdownRequest {}
 
 // Shutdown response
 message ShutdownResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Add vCPU to coordination list
+message AddCoordinationRequest {
+  int32 vcpu_tid = 1;     // The vCPU to modify
+  int32 related_tid = 2;  // vCPU to add to its coordination list
+}
+
+message AddCoordinationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Remove vCPU from coordination list
+message RemoveCoordinationRequest {
+  int32 vcpu_tid = 1;
+  int32 related_tid = 2;
+}
+
+message RemoveCoordinationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Set entire coordination list
+message SetCoordinationListRequest {
+  int32 vcpu_tid = 1;
+  repeated int32 related_tids = 2;
+}
+
+message SetCoordinationListResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Get global coordination list
+message GetGlobalCoordinationListRequest {}
+
+message GetGlobalCoordinationListResponse {
+  bool success = 1;
+  string message = 2;
+  repeated int32 tids = 3;
+}
+
+// Add TID to global coordination list
+message AddGlobalCoordinationRequest {
+  int32 tid = 1;
+}
+
+message AddGlobalCoordinationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Remove TID from global coordination list
+message RemoveGlobalCoordinationRequest {
+  int32 tid = 1;
+}
+
+message RemoveGlobalCoordinationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Set entire global coordination list
+message SetGlobalCoordinationListRequest {
+  repeated int32 tids = 1;
+}
+
+message SetGlobalCoordinationListResponse {
   bool success = 1;
   string message = 2;
 }
@@ -79,6 +153,27 @@ service OssimScheduler {
 
   // Query vCPU registration status
   rpc QueryVcpu(QueryVcpuRequest) returns (QueryVcpuResponse);
+
+  // Add vCPU to coordination list
+  rpc AddCoordination(AddCoordinationRequest) returns (AddCoordinationResponse);
+
+  // Remove vCPU from coordination list
+  rpc RemoveCoordination(RemoveCoordinationRequest) returns (RemoveCoordinationResponse);
+
+  // Set entire coordination list
+  rpc SetCoordinationList(SetCoordinationListRequest) returns (SetCoordinationListResponse);
+
+  // Get global coordination list
+  rpc GetGlobalCoordinationList(GetGlobalCoordinationListRequest) returns (GetGlobalCoordinationListResponse);
+
+  // Add TID to global coordination list
+  rpc AddGlobalCoordination(AddGlobalCoordinationRequest) returns (AddGlobalCoordinationResponse);
+
+  // Remove TID from global coordination list
+  rpc RemoveGlobalCoordination(RemoveGlobalCoordinationRequest) returns (RemoveGlobalCoordinationResponse);
+
+  // Set entire global coordination list
+  rpc SetGlobalCoordinationList(SetGlobalCoordinationListRequest) returns (SetGlobalCoordinationListResponse);
 
   // Shutdown the scheduler
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);

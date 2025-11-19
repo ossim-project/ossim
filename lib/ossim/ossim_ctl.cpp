@@ -236,6 +236,259 @@ int ossim_ctl_query_vcpu(struct ossim_ctl *ctl, pid_t tid,
     metadata->vm_id = vcpu_meta.vm_id();
     metadata->vcpu_id = vcpu_meta.vcpu_id();
     metadata->timestamp = vcpu_meta.timestamp();
+    metadata->coord_list.count = vcpu_meta.coord_count();
+    for (uint32_t i = 0;
+         i < vcpu_meta.coord_count() && i < OSSIM_MAX_COORD_VCPUS; i++) {
+      metadata->coord_list.tids[i] = vcpu_meta.coord_vcpus(i);
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_add_coordination - Add a vCPU to another vCPU's coordination list
+ */
+int ossim_ctl_add_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                               pid_t related_tid) {
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::AddCoordinationRequest request;
+    ossim::AddCoordinationResponse response;
+
+    request.set_vcpu_tid(vcpu_tid);
+    request.set_related_tid(related_tid);
+
+    grpc::Status status =
+        ctl->stub->AddCoordination(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Add coordination failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_remove_coordination - Remove a vCPU from coordination list
+ */
+int ossim_ctl_remove_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                                  pid_t related_tid) {
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::RemoveCoordinationRequest request;
+    ossim::RemoveCoordinationResponse response;
+
+    request.set_vcpu_tid(vcpu_tid);
+    request.set_related_tid(related_tid);
+
+    grpc::Status status =
+        ctl->stub->RemoveCoordination(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Remove coordination failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_set_coordination_list - Set entire coordination list for a vCPU
+ */
+int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                                    struct ossim_coord_list *coord_list) {
+  if (!ctl || !coord_list) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::SetCoordinationListRequest request;
+    ossim::SetCoordinationListResponse response;
+
+    request.set_vcpu_tid(vcpu_tid);
+    for (uint32_t i = 0; i < coord_list->count; i++) {
+      request.add_related_tids(coord_list->tids[i]);
+    }
+
+    grpc::Status status =
+        ctl->stub->SetCoordinationList(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Set coordination list failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_get_global_coordination_list - Get the global coordination list
+ */
+int ossim_ctl_get_global_coordination_list(
+    struct ossim_ctl *ctl, struct ossim_coord_list *coord_list) {
+  if (!ctl || !coord_list) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::GetGlobalCoordinationListRequest request;
+    ossim::GetGlobalCoordinationListResponse response;
+
+    grpc::Status status =
+        ctl->stub->GetGlobalCoordinationList(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Get global coordination list failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    coord_list->count = response.tids_size();
+    for (int i = 0; i < response.tids_size() && i < OSSIM_MAX_COORD_VCPUS;
+         i++) {
+      coord_list->tids[i] = response.tids(i);
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_add_global_coordination - Add a TID to the global coordination list
+ */
+int ossim_ctl_add_global_coordination(struct ossim_ctl *ctl, pid_t tid) {
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::AddGlobalCoordinationRequest request;
+    ossim::AddGlobalCoordinationResponse response;
+
+    request.set_tid(tid);
+
+    grpc::Status status =
+        ctl->stub->AddGlobalCoordination(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Add global coordination failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_remove_global_coordination - Remove a TID from global coordination
+ * list
+ */
+int ossim_ctl_remove_global_coordination(struct ossim_ctl *ctl, pid_t tid) {
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::RemoveGlobalCoordinationRequest request;
+    ossim::RemoveGlobalCoordinationResponse response;
+
+    request.set_tid(tid);
+
+    grpc::Status status =
+        ctl->stub->RemoveGlobalCoordination(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Remove global coordination failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
+ * ossim_ctl_set_global_coordination_list - Set entire global coordination list
+ */
+int ossim_ctl_set_global_coordination_list(
+    struct ossim_ctl *ctl, struct ossim_coord_list *coord_list) {
+  if (!ctl || !coord_list) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::SetGlobalCoordinationListRequest request;
+    ossim::SetGlobalCoordinationListResponse response;
+
+    for (uint32_t i = 0; i < coord_list->count; i++) {
+      request.add_tids(coord_list->tids[i]);
+    }
+
+    grpc::Status status =
+        ctl->stub->SetGlobalCoordinationList(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Set global coordination list failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
 
     return OSSIM_OK;
   } catch (...) {

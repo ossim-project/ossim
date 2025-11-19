@@ -90,6 +90,78 @@ int ossim_ctl_query_vcpu(struct ossim_ctl *ctl, pid_t tid,
                          struct ossim_vcpu_metadata *metadata);
 
 /**
+ * ossim_ctl_add_coordination - Add a vCPU to another vCPU's coordination list
+ * @ctl: Connection handle
+ * @vcpu_tid: Thread ID of the vCPU to modify
+ * @related_tid: Thread ID of the vCPU to add to coordination list
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_add_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                               pid_t related_tid);
+
+/**
+ * ossim_ctl_remove_coordination - Remove a vCPU from coordination list
+ * @ctl: Connection handle
+ * @vcpu_tid: Thread ID of the vCPU to modify
+ * @related_tid: Thread ID of the vCPU to remove from coordination list
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_remove_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                                  pid_t related_tid);
+
+/**
+ * ossim_ctl_set_coordination_list - Set entire coordination list for a vCPU
+ * @ctl: Connection handle
+ * @vcpu_tid: Thread ID of the vCPU to modify
+ * @coord_list: Coordination list containing TIDs to set
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
+                                    struct ossim_coord_list *coord_list);
+
+/**
+ * ossim_ctl_get_global_coordination_list - Get the global coordination list
+ * @ctl: Connection handle
+ * @coord_list: Output buffer for global coordination list
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_get_global_coordination_list(struct ossim_ctl *ctl,
+                                           struct ossim_coord_list *coord_list);
+
+/**
+ * ossim_ctl_add_global_coordination - Add a TID to the global coordination list
+ * @ctl: Connection handle
+ * @tid: Thread ID to add
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_add_global_coordination(struct ossim_ctl *ctl, pid_t tid);
+
+/**
+ * ossim_ctl_remove_global_coordination - Remove a TID from global coordination
+ * list
+ * @ctl: Connection handle
+ * @tid: Thread ID to remove
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_remove_global_coordination(struct ossim_ctl *ctl, pid_t tid);
+
+/**
+ * ossim_ctl_set_global_coordination_list - Set entire global coordination list
+ * @ctl: Connection handle
+ * @coord_list: Coordination list containing TIDs to set
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_set_global_coordination_list(struct ossim_ctl *ctl,
+                                           struct ossim_coord_list *coord_list);
+
+/**
  * ossim_strerror - Get error message for error code
  * @error: Error code from ossim_error enum
  *

@@ -104,14 +104,17 @@ static void print_registered_vcpus(struct scx_ossim *skel) {
 /* Register a vCPU by pushing an event to the queue */
 static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
                          __u32 vcpu_id) {
-  struct ossim_vcpu_event event = {
+  struct ossim_event event = {
       .event_type = OSSIM_EVENT_VCPU_REGISTER,
-      .tid = tid,
-      .vm_id = vm_id,
-      .vcpu_id = vcpu_id,
+      .vcpu_reg =
+          {
+              .tid = tid,
+              .vm_id = vm_id,
+              .vcpu_id = vcpu_id,
+          },
   };
 
-  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.vcpu_event_queue), NULL,
+  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.event_queue), NULL,
                                 &event, BPF_ANY);
   if (ret < 0) {
     fprintf(stderr, "Failed to push vCPU registration event: %s\n",
@@ -129,14 +132,15 @@ static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
 
 /* Unregister a vCPU by pushing an event to the queue */
 static int unregister_vcpu(struct scx_ossim *skel, pid_t tid) {
-  struct ossim_vcpu_event event = {
+  struct ossim_event event = {
       .event_type = OSSIM_EVENT_VCPU_UNREGISTER,
-      .tid = tid,
-      .vm_id = 0,
-      .vcpu_id = 0,
+      .vcpu_unreg =
+          {
+              .tid = tid,
+          },
   };
 
-  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.vcpu_event_queue), NULL,
+  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.event_queue), NULL,
                                 &event, BPF_ANY);
   if (ret < 0) {
     fprintf(stderr, "Failed to push vCPU unregistration event: %s\n",
@@ -224,10 +228,253 @@ public:
       vcpu_meta->set_vm_id(metadata.vm_id);
       vcpu_meta->set_vcpu_id(metadata.vcpu_id);
       vcpu_meta->set_timestamp(metadata.timestamp);
+      vcpu_meta->set_coord_count(metadata.coord_list.count);
+      for (__u32 i = 0; i < metadata.coord_list.count; i++) {
+        vcpu_meta->add_coord_vcpus(metadata.coord_list.tids[i]);
+      }
     } else {
       response->set_success(false);
       response->set_message("vCPU not found");
     }
+    return grpc::Status::OK;
+  }
+
+  grpc::Status
+  AddCoordination(grpc::ServerContext *context,
+                  const ossim::AddCoordinationRequest *request,
+                  ossim::AddCoordinationResponse *response) override {
+    struct ossim_event event = {
+        .event_type = OSSIM_EVENT_COORD_ADD,
+        .coord_op =
+            {
+                .vcpu_tid = request->vcpu_tid(),
+                .related_tid = request->related_tid(),
+            },
+    };
+
+    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
+                                  &event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push coordination event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    response->set_success(true);
+    response->set_message("Coordination add event queued");
+    return grpc::Status::OK;
+  }
+
+  grpc::Status
+  RemoveCoordination(grpc::ServerContext *context,
+                     const ossim::RemoveCoordinationRequest *request,
+                     ossim::RemoveCoordinationResponse *response) override {
+    struct ossim_event event = {
+        .event_type = OSSIM_EVENT_COORD_REMOVE,
+        .coord_op =
+            {
+                .vcpu_tid = request->vcpu_tid(),
+                .related_tid = request->related_tid(),
+            },
+    };
+
+    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
+                                  &event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push coordination event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    response->set_success(true);
+    response->set_message("Coordination remove event queued");
+    return grpc::Status::OK;
+  }
+
+  grpc::Status
+  SetCoordinationList(grpc::ServerContext *context,
+                      const ossim::SetCoordinationListRequest *request,
+                      ossim::SetCoordinationListResponse *response) override {
+    pid_t vcpu_tid = request->vcpu_tid();
+    int queue_fd = bpf_map__fd(skel_->maps.event_queue);
+
+    // Check if the new coordination list is too large
+    if (request->related_tids_size() > OSSIM_MAX_COORD_VCPUS) {
+      response->set_success(false);
+      response->set_message("Coordination list exceeds maximum size");
+      return grpc::Status::OK;
+    }
+
+    // First, push a CLEAR event
+    struct ossim_event clear_event = {
+        .event_type = OSSIM_EVENT_COORD_CLEAR,
+        .coord_op =
+            {
+                .vcpu_tid = vcpu_tid,
+                .related_tid = 0,
+            },
+    };
+    int ret = bpf_map_update_elem(queue_fd, NULL, &clear_event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push clear event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    // Then, push ADD events for each TID in the new list
+    for (int i = 0; i < request->related_tids_size(); i++) {
+      struct ossim_event add_event = {
+          .event_type = OSSIM_EVENT_COORD_ADD,
+          .coord_op =
+              {
+                  .vcpu_tid = vcpu_tid,
+                  .related_tid = request->related_tids(i),
+              },
+      };
+      ret = bpf_map_update_elem(queue_fd, NULL, &add_event, BPF_ANY);
+      if (ret < 0) {
+        response->set_success(false);
+        response->set_message("Failed to push add event: " +
+                              std::string(strerror(errno)));
+        return grpc::Status::OK;
+      }
+    }
+
+    response->set_success(true);
+    response->set_message("Coordination list update events queued");
+    return grpc::Status::OK;
+  }
+
+  grpc::Status GetGlobalCoordinationList(
+      grpc::ServerContext *context,
+      const ossim::GetGlobalCoordinationListRequest *request,
+      ossim::GetGlobalCoordinationListResponse *response) override {
+    struct ossim_coord_list coord_list;
+    __u32 key = 0;
+    int map_fd = bpf_map__fd(skel_->maps.global_coord_list);
+
+    // Look up the global coordination list
+    int ret = bpf_map_lookup_elem(map_fd, &key, &coord_list);
+    if (ret != 0) {
+      response->set_success(false);
+      response->set_message("Failed to get global coordination list: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    response->set_success(true);
+    response->set_message("Global coordination list retrieved");
+    for (__u32 i = 0; i < coord_list.count; i++) {
+      response->add_tids(coord_list.tids[i]);
+    }
+
+    return grpc::Status::OK;
+  }
+
+  grpc::Status AddGlobalCoordination(
+      grpc::ServerContext *context,
+      const ossim::AddGlobalCoordinationRequest *request,
+      ossim::AddGlobalCoordinationResponse *response) override {
+    struct ossim_event event = {
+        .event_type = OSSIM_EVENT_GLOBAL_COORD_ADD,
+        .global_coord =
+            {
+                .tid = request->tid(),
+            },
+    };
+
+    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
+                                  &event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push global coordination event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    response->set_success(true);
+    response->set_message("Global coordination add event queued");
+    return grpc::Status::OK;
+  }
+
+  grpc::Status RemoveGlobalCoordination(
+      grpc::ServerContext *context,
+      const ossim::RemoveGlobalCoordinationRequest *request,
+      ossim::RemoveGlobalCoordinationResponse *response) override {
+    struct ossim_event event = {
+        .event_type = OSSIM_EVENT_GLOBAL_COORD_REMOVE,
+        .global_coord =
+            {
+                .tid = request->tid(),
+            },
+    };
+
+    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
+                                  &event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push global coordination event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    response->set_success(true);
+    response->set_message("Global coordination remove event queued");
+    return grpc::Status::OK;
+  }
+
+  grpc::Status SetGlobalCoordinationList(
+      grpc::ServerContext *context,
+      const ossim::SetGlobalCoordinationListRequest *request,
+      ossim::SetGlobalCoordinationListResponse *response) override {
+    int queue_fd = bpf_map__fd(skel_->maps.event_queue);
+
+    // Check if the list is too large
+    if (request->tids_size() > OSSIM_MAX_COORD_VCPUS) {
+      response->set_success(false);
+      response->set_message("Global coordination list exceeds maximum size");
+      return grpc::Status::OK;
+    }
+
+    // First, push a CLEAR event
+    struct ossim_event clear_event = {
+        .event_type = OSSIM_EVENT_GLOBAL_COORD_CLEAR,
+        .global_coord =
+            {
+                .tid = 0,
+            },
+    };
+    int ret = bpf_map_update_elem(queue_fd, NULL, &clear_event, BPF_ANY);
+    if (ret < 0) {
+      response->set_success(false);
+      response->set_message("Failed to push clear event: " +
+                            std::string(strerror(errno)));
+      return grpc::Status::OK;
+    }
+
+    // Then, push ADD events for each TID in the new list
+    for (int i = 0; i < request->tids_size(); i++) {
+      struct ossim_event add_event = {
+          .event_type = OSSIM_EVENT_GLOBAL_COORD_ADD,
+          .global_coord =
+              {
+                  .tid = request->tids(i),
+              },
+      };
+      ret = bpf_map_update_elem(queue_fd, NULL, &add_event, BPF_ANY);
+      if (ret < 0) {
+        response->set_success(false);
+        response->set_message("Failed to push add event: " +
+                              std::string(strerror(errno)));
+        return grpc::Status::OK;
+      }
+    }
+
+    response->set_success(true);
+    response->set_message("Global coordination list update events queued");
     return grpc::Status::OK;
   }
 
