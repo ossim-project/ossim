@@ -32,19 +32,25 @@ static u64 vtime_now;
 UEI_DEFINE(uei);
 
 /*
- * Built-in DSQs such as SCX_DSQ_GLOBAL cannot be used as priority queues
- * (meaning, cannot be dispatched to with scx_bpf_dsq_insert_vtime()). We
- * therefore create a separate DSQ with ID 0 that we dispatch to and consume
- * from. If scx_simple only supported global FIFO scheduling, then we could just
- * use SCX_DSQ_GLOBAL.
+ * We maintain two global DSQs:
+ * - VCPU_DSQ: For registered vCPU threads
+ * - SYSTEM_DSQ: For system threads (non-vCPU tasks)
  */
-#define SHARED_DSQ 0
+#define VCPU_DSQ 0
+#define SYSTEM_DSQ 1
 
+/*
+ * Statistics counters:
+ * [0]: local enqueues
+ * [1]: global enqueues
+ * [2]: vCPU enqueues
+ * [3]: system enqueues
+ */
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(key_size, sizeof(u32));
   __uint(value_size, sizeof(u64));
-  __uint(max_entries, 2); /* [local, global] */
+  __uint(max_entries, 4); /* [local, global, vcpu, system] */
 } stats SEC(".maps");
 
 /* FIFO queue for pending vCPU registration events */
@@ -104,21 +110,53 @@ s32 BPF_STRUCT_OPS(ossim_select_cpu, struct task_struct *p, s32 prev_cpu,
                    u64 wake_flags) {
   bool is_idle = false;
   s32 cpu;
+  pid_t tid;
+  void *metadata;
 
   cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
   if (is_idle) {
     stat_inc(0); /* count local queueing */
-    scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+
+    /* Check if this is a vCPU task */
+    tid = p->pid;
+    metadata = bpf_map_lookup_elem(&vcpu_registry, &tid);
+
+    if (metadata != NULL) {
+      /* vCPU task - route to vCPU DSQ instead of local */
+      scx_bpf_dsq_insert(p, VCPU_DSQ, SCX_SLICE_DFL, 0);
+      stat_inc(2); /* count vCPU enqueues */
+    } else {
+      /* System task - can use local DSQ */
+      scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+    }
   }
 
   return cpu;
 }
 
 void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
+  pid_t tid;
+  u64 dsq_id;
+  void *metadata;
+
   stat_inc(1); /* count global queueing */
 
+  /* Get the thread ID from task_struct */
+  tid = p->pid;
+
+  /* Check if this task is a registered vCPU */
+  metadata = bpf_map_lookup_elem(&vcpu_registry, &tid);
+
+  if (metadata != NULL) {
+    dsq_id = VCPU_DSQ;
+    stat_inc(2); /* vCPU enqueue */
+  } else {
+    dsq_id = SYSTEM_DSQ;
+    stat_inc(3); /* system enqueu */
+  }
+
   if (fifo_sched) {
-    scx_bpf_dsq_insert(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
+    scx_bpf_dsq_insert(p, dsq_id, SCX_SLICE_DFL, enq_flags);
   } else {
     u64 vtime = p->scx.dsq_vtime;
 
@@ -129,7 +167,7 @@ void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
     if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
       vtime = vtime_now - SCX_SLICE_DFL;
 
-    scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime, enq_flags);
+    scx_bpf_dsq_insert_vtime(p, dsq_id, SCX_SLICE_DFL, vtime, enq_flags);
   }
 }
 
@@ -137,7 +175,11 @@ void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
   /* Process pending vCPU registration events */
   process_vcpu_events();
 
-  scx_bpf_dsq_move_to_local(SHARED_DSQ);
+  /* Dispatch from vCPU DSQ first (higher priority) */
+  scx_bpf_dsq_move_to_local(VCPU_DSQ);
+
+  /* Then dispatch from system DSQ */
+  scx_bpf_dsq_move_to_local(SYSTEM_DSQ);
 }
 
 void BPF_STRUCT_OPS(ossim_running, struct task_struct *p) {
@@ -175,7 +217,17 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
 }
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init) {
-  return scx_bpf_create_dsq(SHARED_DSQ, -1);
+  s32 ret;
+
+  ret = scx_bpf_create_dsq(VCPU_DSQ, -1);
+  if (ret)
+    return ret;
+
+  ret = scx_bpf_create_dsq(SYSTEM_DSQ, -1);
+  if (ret)
+    return ret;
+
+  return 0;
 }
 
 void BPF_STRUCT_OPS(ossim_exit, struct scx_exit_info *ei) {

@@ -6,6 +6,8 @@ package ossim;
 message Stats {
   uint64 local_enqueues = 1;
   uint64 global_enqueues = 2;
+  uint64 vcpu_enqueues = 3;
+  uint64 system_enqueues = 4;
 }
 
 // vCPU registration request

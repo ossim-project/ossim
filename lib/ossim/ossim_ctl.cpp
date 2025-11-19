@@ -79,6 +79,8 @@ int ossim_ctl_get_stats(struct ossim_ctl *ctl, struct ossim_stats *stats) {
 
     stats->local_enqueues = response.local_enqueues();
     stats->global_enqueues = response.global_enqueues();
+    stats->vcpu_enqueues = response.vcpu_enqueues();
+    stats->system_enqueues = response.system_enqueues();
 
     return OSSIM_OK;
   } catch (...) {

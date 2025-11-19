@@ -29,6 +29,8 @@ struct ossim_vcpu_metadata {
 struct ossim_stats {
   uint64_t local_enqueues;  /* Local enqueue count */
   uint64_t global_enqueues; /* Global enqueue count */
+  uint64_t vcpu_enqueues;   /* vCPU enqueue count */
+  uint64_t system_enqueues; /* System (non-vCPU) enqueue count */
 };
 
 /* Error codes */
