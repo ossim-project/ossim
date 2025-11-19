@@ -25,8 +25,8 @@ static int send_command(const char *command) {
     struct ossim_stats stats;
     ret = ossim_ctl_get_stats(ctl, &stats);
     if (ret == OSSIM_OK) {
-      printf("local=%lu global=%lu\n", stats.local_enqueues,
-             stats.global_enqueues);
+      printf("local=%lu global=%lu vcpu=%lu system=%lu\n", stats.local_enqueues,
+             stats.global_enqueues, stats.vcpu_enqueues, stats.system_enqueues);
     } else {
       fprintf(stderr, "Failed to get stats: %s\n", ossim_strerror(ret));
       ossim_ctl_disconnect(ctl);

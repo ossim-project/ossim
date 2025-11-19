@@ -50,14 +50,16 @@ static void sigint_handler(int simple) { exit_req = 1; }
 static void read_stats(struct scx_ossim *skel, __u64 *stats) {
   int nr_cpus = libbpf_num_possible_cpus();
   assert(nr_cpus > 0);
-  __u64 *cnts[2];
+  __u64 *cnts[4];
   cnts[0] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
   cnts[1] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
+  cnts[2] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
+  cnts[3] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
   __u32 idx;
 
-  memset(stats, 0, sizeof(stats[0]) * 2);
+  memset(stats, 0, sizeof(stats[0]) * 4);
 
-  for (idx = 0; idx < 2; idx++) {
+  for (idx = 0; idx < 4; idx++) {
     int ret, cpu;
 
     ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.stats), &idx, cnts[idx]);
@@ -69,6 +71,8 @@ static void read_stats(struct scx_ossim *skel, __u64 *stats) {
 
   free(cnts[0]);
   free(cnts[1]);
+  free(cnts[2]);
+  free(cnts[3]);
 }
 
 /* Print registered vCPUs */
@@ -166,10 +170,12 @@ public:
   grpc::Status GetStats(grpc::ServerContext *context,
                         const ossim::GetStatsRequest *request,
                         ossim::Stats *response) override {
-    __u64 stats[2];
+    __u64 stats[4];
     read_stats(skel_, stats);
     response->set_local_enqueues(stats[0]);
     response->set_global_enqueues(stats[1]);
+    response->set_vcpu_enqueues(stats[2]);
+    response->set_system_enqueues(stats[3]);
     return grpc::Status::OK;
   }
 
@@ -342,10 +348,11 @@ restart:
 
   /* Main stats display loop */
   while (!exit_req && !UEI_EXITED(skel, uei)) {
-    __u64 stats[2];
+    __u64 stats[4];
 
     read_stats(skel, stats);
-    printf("local=%llu global=%llu\n", stats[0], stats[1]);
+    printf("local=%llu global=%llu vcpu=%llu system=%llu\n", stats[0], stats[1],
+           stats[2], stats[3]);
     print_registered_vcpus(skel);
     printf("\n");
     fflush(stdout);
