@@ -17,12 +17,22 @@ struct ossim_ctl_vcpu_registration {
   uint32_t vcpu_id;
 } __attribute__((packed));
 
+/* Maximum vCPUs that a single vCPU can coordinate with */
+#define OSSIM_MAX_COORD_VCPUS 32
+
+/* Coordination list for managing vCPU relationships */
+struct ossim_coord_list {
+  uint32_t count;                    /* Number of TIDs in the list */
+  pid_t tids[OSSIM_MAX_COORD_VCPUS]; /* Array of vCPU TIDs */
+};
+
 /* vCPU metadata returned from query */
 struct ossim_vcpu_metadata {
   pid_t tid;
   uint32_t vm_id;
   uint32_t vcpu_id;
   uint64_t timestamp;
+  struct ossim_coord_list coord_list; /* Coordination list for this vCPU */
 };
 
 /* Scheduler statistics */

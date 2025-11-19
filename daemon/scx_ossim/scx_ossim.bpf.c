@@ -1,25 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * A simple scheduler.
- *
- * By default, it operates as a simple global weighted vtime scheduler and can
- * be switched to FIFO scheduling. It also demonstrates the following niceties.
- *
- * - Statistics tracking how many tasks are queued to local and global dsq's.
- * - Termination notification for userspace.
- *
- * While very simple, this scheduler should work reasonably well on CPUs with a
- * uniform L3 cache topology. While preemption is not implemented, the fact that
- * the scheduling queue is shared across all CPUs means that whatever is at the
- * front of the queue is likely to be executed fairly quickly given enough
- * number of CPUs. The FIFO scheduling mode may be beneficial to some workloads
- * but comes with the usual problems with FIFO scheduling where saturating
- * threads can easily drown out interactive ones.
- *
- * Copyright (c) 2022 Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2022 Tejun Heo <tj@kernel.org>
- * Copyright (c) 2022 David Vernet <dvernet@meta.com>
- */
 #include <scx/common.bpf.h>
 
 #include "interface.h"
@@ -53,12 +31,12 @@ struct {
   __uint(max_entries, 4); /* [local, global, vcpu, system] */
 } stats SEC(".maps");
 
-/* FIFO queue for pending vCPU registration events */
+/* Unified FIFO queue for all pending events */
 struct {
   __uint(type, BPF_MAP_TYPE_QUEUE);
   __uint(max_entries, OSSIM_MAX_PENDING_EVENTS);
-  __type(value, struct ossim_vcpu_event);
-} vcpu_event_queue SEC(".maps");
+  __type(value, struct ossim_event);
+} event_queue SEC(".maps");
 
 /* Hash map storing registered vCPUs (key: TID, value: metadata) */
 struct {
@@ -68,40 +46,169 @@ struct {
   __type(value, struct ossim_bpf_vcpu_metadata);
 } vcpu_registry SEC(".maps");
 
+/* Global coordination list (single entry, key = 0) */
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 1);
+  __type(key, __u32);
+  __type(value, struct ossim_coord_list);
+} global_coord_list SEC(".maps");
+
 static void stat_inc(u32 idx) {
   u64 *cnt_p = bpf_map_lookup_elem(&stats, &idx);
   if (cnt_p)
     (*cnt_p)++;
 }
 
-/* Process pending vCPU registration events from the queue */
-static void process_vcpu_events(void) {
-  struct ossim_vcpu_event event;
+/* Coordination list helper functions
+ *
+ * TODO: Consider whether we need to protect each coordination list
+ * with a spinlock.
+ */
+static void coord_list_add(struct ossim_coord_list *list, pid_t tid) {
+  if (!list || list->count >= OSSIM_MAX_COORD_VCPUS)
+    return;
+
+  /* Check if already in list */
+  __u32 count = list->count;
+  if (count > OSSIM_MAX_COORD_VCPUS)
+    count = OSSIM_MAX_COORD_VCPUS;
+
+  for (__u32 j = 0; j < count; j++) {
+    if (j >= OSSIM_MAX_COORD_VCPUS)
+      break;
+    if (list->tids[j] == tid)
+      return; /* Already exists */
+  }
+
+  /* Add to list */
+  if (list->count < OSSIM_MAX_COORD_VCPUS) {
+    list->tids[list->count] = tid;
+    list->count++;
+  }
+}
+
+static void coord_list_remove(struct ossim_coord_list *list, pid_t tid) {
+  if (!list || list->count > OSSIM_MAX_COORD_VCPUS)
+    return;
+
+  __u32 count = list->count;
+  if (count > OSSIM_MAX_COORD_VCPUS)
+    count = OSSIM_MAX_COORD_VCPUS;
+
+  for (__u32 j = 0; j < count; j++) {
+    if (j >= OSSIM_MAX_COORD_VCPUS)
+      break;
+    if (list->tids[j] == tid) {
+      /* Shift remaining elements */
+      __u32 shift_count = count - 1;
+      if (shift_count > OSSIM_MAX_COORD_VCPUS - 1)
+        shift_count = OSSIM_MAX_COORD_VCPUS - 1;
+      for (__u32 k = j; k < shift_count; k++) {
+        if (k >= OSSIM_MAX_COORD_VCPUS - 1 || k + 1 >= OSSIM_MAX_COORD_VCPUS)
+          break;
+        list->tids[k] = list->tids[k + 1];
+      }
+      list->count--;
+      break;
+    }
+  }
+}
+
+/* Process pending events from the unified queue */
+static void process_events(void) {
+  struct ossim_event event;
   int ret;
 
-/* Process up to 32 events per call to avoid hogging CPU */
-#pragma unroll
+  /* Process up to 32 events per call to avoid hogging CPU */
   for (int i = 0; i < 32; i++) {
-    ret = bpf_map_pop_elem(&vcpu_event_queue, &event);
+    ret = bpf_map_pop_elem(&event_queue, &event);
     if (ret != 0) {
       /* Queue is empty */
       break;
     }
 
     if (event.event_type == OSSIM_EVENT_VCPU_REGISTER) {
+      /* Register vCPU */
       struct ossim_bpf_vcpu_metadata metadata = {
-          .tid = event.tid,
-          .vm_id = event.vm_id,
-          .vcpu_id = event.vcpu_id,
+          .tid = event.vcpu_reg.tid,
+          .vm_id = event.vcpu_reg.vm_id,
+          .vcpu_id = event.vcpu_reg.vcpu_id,
           .timestamp = bpf_ktime_get_ns(),
+          .coord_list = {.count = 0},
       };
+      bpf_map_update_elem(&vcpu_registry, &event.vcpu_reg.tid, &metadata,
+                          BPF_ANY);
 
-      /* Register the vCPU in the registry */
-      bpf_map_update_elem(&vcpu_registry, &event.tid, &metadata, BPF_ANY);
-
+      /* Now, we add all vCPUs to the global coordination list */
+      __u32 key = 0;
+      struct ossim_coord_list *global_list;
+      global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+      if (global_list) {
+        coord_list_add(global_list, event.vcpu_reg.tid);
+      }
     } else if (event.event_type == OSSIM_EVENT_VCPU_UNREGISTER) {
-      /* Unregister the vCPU from the registry */
-      bpf_map_delete_elem(&vcpu_registry, &event.tid);
+      /* Unregister vCPU */
+      bpf_map_delete_elem(&vcpu_registry, &event.vcpu_unreg.tid);
+
+      /* Remove from global coordination list */
+      __u32 key = 0;
+      struct ossim_coord_list *global_list;
+      global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+      if (global_list) {
+        coord_list_remove(global_list, event.vcpu_unreg.tid);
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_COORD_ADD) {
+      /* Add vCPU to another vCPU's coordination list */
+      struct ossim_bpf_vcpu_metadata *metadata;
+      metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
+      if (metadata) {
+        coord_list_add(&metadata->coord_list, event.coord_op.related_tid);
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_COORD_REMOVE) {
+      /* Remove vCPU from coordination list */
+      struct ossim_bpf_vcpu_metadata *metadata;
+      metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
+      if (metadata) {
+        coord_list_remove(&metadata->coord_list, event.coord_op.related_tid);
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_COORD_CLEAR) {
+      /* Clear coordination list */
+      struct ossim_bpf_vcpu_metadata *metadata;
+      metadata = bpf_map_lookup_elem(&vcpu_registry, &event.coord_op.vcpu_tid);
+      if (metadata) {
+        metadata->coord_list.count = 0;
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_ADD) {
+      /* Add TID to global coordination list */
+      __u32 key = 0;
+      struct ossim_coord_list *global_list;
+      global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+      if (global_list) {
+        coord_list_add(global_list, event.global_coord.tid);
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_REMOVE) {
+      /* Remove TID from global coordination list */
+      __u32 key = 0;
+      struct ossim_coord_list *global_list;
+      global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+      if (global_list) {
+        coord_list_remove(global_list, event.global_coord.tid);
+      }
+
+    } else if (event.event_type == OSSIM_EVENT_GLOBAL_COORD_CLEAR) {
+      /* Clear global coordination list */
+      __u32 key = 0;
+      struct ossim_coord_list *global_list;
+      global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+      if (global_list) {
+        global_list->count = 0;
+      }
     }
   }
 }
@@ -172,8 +279,8 @@ void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
 }
 
 void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
-  /* Process pending vCPU registration events */
-  process_vcpu_events();
+  /* Process pending events (registration and coordination) */
+  process_events();
 
   /* Dispatch from vCPU DSQ first (higher priority) */
   scx_bpf_dsq_move_to_local(VCPU_DSQ);
@@ -216,8 +323,35 @@ void BPF_STRUCT_OPS(ossim_enable, struct task_struct *p) {
   p->scx.dsq_vtime = vtime_now;
 }
 
+void BPF_STRUCT_OPS(ossim_disable, struct task_struct *p) {
+  pid_t tid = p->pid;
+  struct ossim_bpf_vcpu_metadata *metadata;
+
+  /* Check if this task is a registered vCPU */
+  metadata = bpf_map_lookup_elem(&vcpu_registry, &tid);
+  if (!metadata)
+    return; /* Not a vCPU, nothing to clean up */
+
+  /* Remove from the global coordination list */
+  __u32 key = 0;
+  struct ossim_coord_list *global_list;
+  global_list = bpf_map_lookup_elem(&global_coord_list, &key);
+  if (global_list) {
+    coord_list_remove(global_list, tid);
+  }
+
+  /*
+   * Note: We don't clean up per-vCPU coordination lists here because
+   * iterating through all registered vCPUs would be too expensive in BPF.
+   * Per-vCPU coordination list entries pointing to this TID will naturally
+   * fail when trying to coordinate with a non-existent vCPU.
+   */
+}
+
 s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init) {
   s32 ret;
+  __u32 key = 0;
+  struct ossim_coord_list empty_list = {.count = 0};
 
   ret = scx_bpf_create_dsq(VCPU_DSQ, -1);
   if (ret)
@@ -226,6 +360,9 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(ossim_init) {
   ret = scx_bpf_create_dsq(SYSTEM_DSQ, -1);
   if (ret)
     return ret;
+
+  /* Initialize global coordination list to empty */
+  bpf_map_update_elem(&global_coord_list, &key, &empty_list, BPF_ANY);
 
   return 0;
 }
@@ -239,5 +376,6 @@ SCX_OPS_DEFINE(ossim_ops, .select_cpu = (void *)ossim_select_cpu,
                .dispatch = (void *)ossim_dispatch,
                .running = (void *)ossim_running,
                .stopping = (void *)ossim_stopping,
-               .enable = (void *)ossim_enable, .init = (void *)ossim_init,
-               .exit = (void *)ossim_exit, .name = "ossim");
+               .enable = (void *)ossim_enable, .disable = (void *)ossim_disable,
+               .init = (void *)ossim_init, .exit = (void *)ossim_exit,
+               .name = "ossim");

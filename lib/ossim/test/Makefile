@@ -11,27 +11,27 @@ LDFLAGS := -L.. -l:libossim.a $(GRPC_LDFLAGS) -lgrpc++_reflection -lstdc++ -lm
 
 TEST_PROGS := test_libossim_cli test_vcpu_loop
 
-all: clean-lib $(TEST_PROGS)
+all: $(TEST_PROGS)
 
-# Build the library first
-../libossim.a:
-	@echo "Building libossim..."
-	$(MAKE) -C ..
-
-test_socket_client: test_socket_client.c ../libossim.a
-	@echo "Building test client: $@"
+test_libossim_cli: test_libossim_cli.c
+	@echo "Building libossim CLI test: $@"
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-vcpu_loop_test: vcpu_loop_test.c ../libossim.a
+test_vcpu_loop: test_vcpu_loop.c
 	@echo "Building vCPU loop test: $@"
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+$(TEST_PROGS): lib
 
 clean:
 	rm -f $(TEST_PROGS)
 
 .PHONY: all clean
 
+lib:
+	$(MAKE) -C ..
+
 clean-lib:
 	rm -f ../libossim.a
 
-.PHONY: clean-lib
+.PHONY: lib clean-lib

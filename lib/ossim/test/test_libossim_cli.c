@@ -94,9 +94,17 @@ static int send_command(const char *command) {
       struct ossim_vcpu_metadata metadata;
       ret = ossim_ctl_query_vcpu(ctl, tid, &metadata);
       if (ret == OSSIM_OK) {
-        printf("vCPU metadata: tid=%d vm_id=%u vcpu_id=%u timestamp=%lu\n",
+        printf("vCPU metadata: tid=%d vm_id=%u vcpu_id=%u timestamp=%lu "
+               "coord_count=%u\n",
                metadata.tid, metadata.vm_id, metadata.vcpu_id,
-               metadata.timestamp);
+               metadata.timestamp, metadata.coord_list.count);
+        if (metadata.coord_list.count > 0) {
+          printf("Coordination list:");
+          for (uint32_t i = 0; i < metadata.coord_list.count; i++) {
+            printf(" %d", metadata.coord_list.tids[i]);
+          }
+          printf("\n");
+        }
       } else {
         fprintf(stderr, "Failed to query vCPU: %s\n", ossim_strerror(ret));
         ossim_ctl_disconnect(ctl);
@@ -104,6 +112,159 @@ static int send_command(const char *command) {
       }
     } else {
       fprintf(stderr, "Invalid format. Use: query_vcpu <tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "add_coord ", 10) == 0) {
+    /* Parse: add_coord <vcpu_tid> <related_tid> */
+    pid_t vcpu_tid, related_tid;
+    if (sscanf(command + 10, "%d %d", &vcpu_tid, &related_tid) == 2) {
+      ret = ossim_ctl_add_coordination(ctl, vcpu_tid, related_tid);
+      if (ret == OSSIM_OK) {
+        printf("Added vCPU %d to coordination list of vCPU %d\n", related_tid,
+               vcpu_tid);
+      } else {
+        fprintf(stderr, "Failed to add coordination: %s\n",
+                ossim_strerror(ret));
+        ossim_ctl_disconnect(ctl);
+        return -1;
+      }
+    } else {
+      fprintf(stderr,
+              "Invalid format. Use: add_coord <vcpu_tid> <related_tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "remove_coord ", 13) == 0) {
+    /* Parse: remove_coord <vcpu_tid> <related_tid> */
+    pid_t vcpu_tid, related_tid;
+    if (sscanf(command + 13, "%d %d", &vcpu_tid, &related_tid) == 2) {
+      ret = ossim_ctl_remove_coordination(ctl, vcpu_tid, related_tid);
+      if (ret == OSSIM_OK) {
+        printf("Removed vCPU %d from coordination list of vCPU %d\n",
+               related_tid, vcpu_tid);
+      } else {
+        fprintf(stderr, "Failed to remove coordination: %s\n",
+                ossim_strerror(ret));
+        ossim_ctl_disconnect(ctl);
+        return -1;
+      }
+    } else {
+      fprintf(stderr,
+              "Invalid format. Use: remove_coord <vcpu_tid> <related_tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "set_coord_list ", 15) == 0) {
+    /* Parse: set_coord_list <vcpu_tid> <tid1> <tid2> ... */
+    pid_t vcpu_tid;
+    struct ossim_coord_list coord_list = {.count = 0};
+    const char *arg_start = command + 15;
+    char *endptr;
+
+    /* Parse vcpu_tid */
+    vcpu_tid = strtol(arg_start, &endptr, 10);
+    if (endptr == arg_start) {
+      fprintf(
+          stderr,
+          "Invalid format. Use: set_coord_list <vcpu_tid> <tid1> <tid2> ...\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+
+    /* Parse remaining TIDs */
+    arg_start = endptr;
+    while (*arg_start && coord_list.count < OSSIM_MAX_COORD_VCPUS) {
+      pid_t tid = strtol(arg_start, &endptr, 10);
+      if (endptr == arg_start)
+        break;
+      coord_list.tids[coord_list.count++] = tid;
+      arg_start = endptr;
+    }
+
+    ret = ossim_ctl_set_coordination_list(ctl, vcpu_tid, &coord_list);
+    if (ret == OSSIM_OK) {
+      printf("Set coordination list for vCPU %d with %u entries\n", vcpu_tid,
+             coord_list.count);
+    } else {
+      fprintf(stderr, "Failed to set coordination list: %s\n",
+              ossim_strerror(ret));
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strcmp(command, "get_global_coord") == 0) {
+    struct ossim_coord_list coord_list;
+    ret = ossim_ctl_get_global_coordination_list(ctl, &coord_list);
+    if (ret == OSSIM_OK) {
+      printf("Global coordination list (count=%u):", coord_list.count);
+      for (uint32_t i = 0; i < coord_list.count; i++) {
+        printf(" %d", coord_list.tids[i]);
+      }
+      printf("\n");
+    } else {
+      fprintf(stderr, "Failed to get global coordination list: %s\n",
+              ossim_strerror(ret));
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "add_global_coord ", 17) == 0) {
+    /* Parse: add_global_coord <tid> */
+    pid_t tid;
+    if (sscanf(command + 17, "%d", &tid) == 1) {
+      ret = ossim_ctl_add_global_coordination(ctl, tid);
+      if (ret == OSSIM_OK) {
+        printf("Added TID %d to global coordination list\n", tid);
+      } else {
+        fprintf(stderr, "Failed to add global coordination: %s\n",
+                ossim_strerror(ret));
+        ossim_ctl_disconnect(ctl);
+        return -1;
+      }
+    } else {
+      fprintf(stderr, "Invalid format. Use: add_global_coord <tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "remove_global_coord ", 20) == 0) {
+    /* Parse: remove_global_coord <tid> */
+    pid_t tid;
+    if (sscanf(command + 20, "%d", &tid) == 1) {
+      ret = ossim_ctl_remove_global_coordination(ctl, tid);
+      if (ret == OSSIM_OK) {
+        printf("Removed TID %d from global coordination list\n", tid);
+      } else {
+        fprintf(stderr, "Failed to remove global coordination: %s\n",
+                ossim_strerror(ret));
+        ossim_ctl_disconnect(ctl);
+        return -1;
+      }
+    } else {
+      fprintf(stderr, "Invalid format. Use: remove_global_coord <tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "set_global_coord_list ", 22) == 0) {
+    /* Parse: set_global_coord_list <tid1> <tid2> ... */
+    struct ossim_coord_list coord_list = {.count = 0};
+    const char *arg_start = command + 22;
+    char *endptr;
+
+    /* Parse TIDs */
+    while (*arg_start && coord_list.count < OSSIM_MAX_COORD_VCPUS) {
+      pid_t tid = strtol(arg_start, &endptr, 10);
+      if (endptr == arg_start)
+        break;
+      coord_list.tids[coord_list.count++] = tid;
+      arg_start = endptr;
+    }
+
+    ret = ossim_ctl_set_global_coordination_list(ctl, &coord_list);
+    if (ret == OSSIM_OK) {
+      printf("Set global coordination list with %u entries\n",
+             coord_list.count);
+    } else {
+      fprintf(stderr, "Failed to set global coordination list: %s\n",
+              ossim_strerror(ret));
       ossim_ctl_disconnect(ctl);
       return -1;
     }
@@ -117,6 +278,22 @@ static int send_command(const char *command) {
     printf("  unregister_vcpu <tid>              Unregister a vCPU\n");
     printf("  query_vcpu <tid>                   Query vCPU registration "
            "status\n");
+    printf(
+        "  add_coord <vcpu_tid> <related_tid> Add vCPU to coordination list\n");
+    printf("  remove_coord <vcpu_tid> <related_tid>  Remove vCPU from "
+           "coordination "
+           "list\n");
+    printf("  set_coord_list <vcpu_tid> <tid1> <tid2> ...  Set entire "
+           "coordination list\n");
+    printf(
+        "  get_global_coord                   Get global coordination list\n");
+    printf(
+        "  add_global_coord <tid>             Add TID to global coordination "
+        "list\n");
+    printf("  remove_global_coord <tid>          Remove TID from global "
+           "coordination list\n");
+    printf("  set_global_coord_list <tid1> <tid2> ...  Set entire global "
+           "coordination list\n");
     printf("  shutdown                           Shutdown the scheduler\n");
     printf("  help                               Show this help message\n");
   } else {
@@ -203,6 +380,20 @@ static void print_usage(const char *prog_name) {
   printf("  unregister_vcpu <tid>              Unregister a vCPU\n");
   printf(
       "  query_vcpu <tid>                   Query vCPU registration status\n");
+  printf(
+      "  add_coord <vcpu_tid> <related_tid> Add vCPU to coordination list\n");
+  printf(
+      "  remove_coord <vcpu_tid> <related_tid>  Remove vCPU from coordination "
+      "list\n");
+  printf("  set_coord_list <vcpu_tid> <tid1> <tid2> ...  Set entire "
+         "coordination list\n");
+  printf("  get_global_coord                   Get global coordination list\n");
+  printf("  add_global_coord <tid>             Add TID to global coordination "
+         "list\n");
+  printf("  remove_global_coord <tid>          Remove TID from global "
+         "coordination list\n");
+  printf("  set_global_coord_list <tid1> <tid2> ...  Set entire global "
+         "coordination list\n");
   printf("  shutdown                           Shutdown the scheduler\n");
   printf(
       "  help                               Show available server commands\n");
@@ -213,6 +404,21 @@ static void print_usage(const char *prog_name) {
          "vm_id=0, vcpu_id=0\n",
          prog_name);
   printf("  %s query_vcpu 1234                 # Query vCPU with tid=1234\n",
+         prog_name);
+  printf("  %s add_coord 1234 5678             # Add vCPU 5678 to coordination "
+         "list of vCPU 1234\n",
+         prog_name);
+  printf("  %s set_coord_list 1234 5678 9012   # Set coordination list of vCPU "
+         "1234 to [5678, 9012]\n",
+         prog_name);
+  printf(
+      "  %s get_global_coord                # Get global coordination list\n",
+      prog_name);
+  printf("  %s add_global_coord 1234           # Add TID 1234 to global "
+         "coordination list\n",
+         prog_name);
+  printf("  %s set_global_coord_list 1234 5678 # Set global coordination list "
+         "to [1234, 5678]\n",
          prog_name);
   printf(
       "  %s unregister_vcpu 1234            # Unregister vCPU with tid=1234\n",
