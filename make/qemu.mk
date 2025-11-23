@@ -9,7 +9,7 @@ myqemu: $(myqemu)
 $(myqemu): build-qemu
 
 .PHONY: configure-qemu
-configure-qemu:
+configure-qemu: install-libossim
 	@mkdir -p $(qemu_b)
 	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
 		--prefix=$(abspath $(PREFIX)) \
@@ -21,7 +21,7 @@ configure-qemu:
 
 
 .PHONY: build-qemu
-build-qemu:
+build-qemu: install-libossim
 	$(MAKE) -C $(qemu_b) -j`nproc`
 	$(MAKE) -C $(qemu_b) install
 

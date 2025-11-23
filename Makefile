@@ -23,6 +23,7 @@ clean:
 
 qemu := qemu-system-x86_64
 
+include make/lib.mk
 include make/qemu.mk
 include make/libvirt.mk
 include make/linux.mk
