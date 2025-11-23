@@ -8,6 +8,7 @@
 extern "C" {
 #include <assert.h>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <errno.h>
 #include <libgen.h>
 #include <pthread.h>
@@ -28,9 +29,8 @@ const char help_fmt[] =
     "\n"
     "See the top-level comment in .bpf.c for more details.\n"
     "\n"
-    "Usage: %s [-f] [-v] [-h]\n"
+    "Usage: %s [-v] [-h]\n"
     "\n"
-    "  -f            Use FIFO scheduling instead of weighted vtime scheduling\n"
     "  -v            Print libbpf debug messages\n"
     "  -h            Display this help and exit\n";
 
@@ -88,7 +88,7 @@ static void print_registered_vcpus(struct scx_ossim *skel) {
   key = 0;
   while (bpf_map_get_next_key(map_fd, &key, &next_key) == 0) {
     if (bpf_map_lookup_elem(map_fd, &next_key, &metadata) == 0) {
-      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u timestamp=%llu\n", count,
+      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u timestamp=%lu\n", count,
              metadata.tid, metadata.vm_id, metadata.vcpu_id,
              metadata.timestamp);
       count++;
@@ -228,9 +228,9 @@ public:
       vcpu_meta->set_vm_id(metadata.vm_id);
       vcpu_meta->set_vcpu_id(metadata.vcpu_id);
       vcpu_meta->set_timestamp(metadata.timestamp);
-      vcpu_meta->set_coord_count(metadata.coord_list.count);
-      for (__u32 i = 0; i < metadata.coord_list.count; i++) {
-        vcpu_meta->add_coord_vcpus(metadata.coord_list.tids[i]);
+      vcpu_meta->set_coord_count(metadata.sync_scope.count);
+      for (__u32 i = 0; i < metadata.sync_scope.count; i++) {
+        vcpu_meta->add_coord_vcpus(metadata.sync_scope.tids[i]);
       }
     } else {
       response->set_success(false);
@@ -352,23 +352,14 @@ public:
       grpc::ServerContext *context,
       const ossim::GetGlobalCoordinationListRequest *request,
       ossim::GetGlobalCoordinationListResponse *response) override {
-    struct scx_ossim_coord_list coord_list;
-    __u32 key = 0;
-    int map_fd = bpf_map__fd(skel_->maps.global_coord_list);
-
-    // Look up the global coordination list
-    int ret = bpf_map_lookup_elem(map_fd, &key, &coord_list);
-    if (ret != 0) {
-      response->set_success(false);
-      response->set_message("Failed to get global coordination list: " +
-                            std::string(strerror(errno)));
-      return grpc::Status::OK;
-    }
+    // Access global_sync_scope directly from BSS
+    struct scx_ossim_sync_scope *sync_scope = &skel_->bss->global_sync_scope;
 
     response->set_success(true);
     response->set_message("Global coordination list retrieved");
-    for (__u32 i = 0; i < coord_list.count; i++) {
-      response->add_tids(coord_list.tids[i]);
+    for (__u32 i = 0; i < sync_scope->count && i < SCX_OSSIM_MAX_COORD_VCPUS;
+         i++) {
+      response->add_tids(sync_scope->tids[i]);
     }
 
     return grpc::Status::OK;
@@ -567,11 +558,8 @@ int main(int argc, char **argv) {
 restart:
   skel = SCX_OPS_OPEN(ossim_ops, scx_ossim);
 
-  while ((opt = getopt(argc, argv, "fvh")) != -1) {
+  while ((opt = getopt(argc, argv, "vh")) != -1) {
     switch (opt) {
-    case 'f':
-      skel->rodata->fifo_sched = true;
-      break;
     case 'v':
       verbose = true;
       break;
@@ -583,6 +571,8 @@ restart:
       return opt != 'h';
     }
   }
+
+  skel->bss->simt_epoch = 1000000; /* 1ms by default */
 
   SCX_OPS_LOAD(skel, ossim_ops, scx_ossim, uei);
   link = SCX_OPS_ATTACH(skel, ossim_ops, scx_ossim);

@@ -8,11 +8,15 @@
 #include "vmlinux.h"
 #endif
 
+/* In scx_ossim, `simt` serves as the abbreviation for `simulated time` */
+#define SCX_OSSIM_SIMT_MAX ((u64)(-1))
+
 /* Maximum number of pending events in the queue */
 #define SCX_OSSIM_MAX_PENDING_EVENTS 1024
 
 /* Maximum number of registered vCPUs */
-#define SCX_OSSIM_MAX_VCPUS 4096
+#define SCX_OSSIM_MAX_VCPUS 64
+#define SCX_OSSIM_LOG2_MAX_VCPUS 6
 
 /* Event types for the registration queue */
 enum scx_ossim_event_type {
@@ -52,7 +56,7 @@ struct scx_ossim_global_coord_event {
 
 /* Unified event structure with union for type-specific data */
 struct scx_ossim_event {
-  __u32 event_type; /* enum ossim_event_type */
+  u32 event_type; /* enum ossim_event_type */
   union {
     struct scx_ossim_vcpu_reg_event vcpu_reg;
     struct scx_ossim_vcpu_unreg_event vcpu_unreg;
@@ -64,19 +68,19 @@ struct scx_ossim_event {
 /* Maximum vCPUs that a single vCPU can coordinate with */
 #define SCX_OSSIM_MAX_COORD_VCPUS 8
 
-/* Coordination list structure (used for both per-vCPU and global lists) */
-struct scx_ossim_coord_list {
-  __u32 count;                           /* Number of TIDs in the list */
+/* Coordination domain structure (used for both per-vCPU and global lists) */
+struct scx_ossim_sync_scope {
+  u32 count;                             /* Number of TIDs in the list */
   pid_t tids[SCX_OSSIM_MAX_COORD_VCPUS]; /* Array of TIDs */
 };
 
 /* Metadata stored for each registered vCPU */
 struct scx_ossim_vcpu_metadata {
   pid_t tid;
-  __u32 vm_id;
-  __u32 vcpu_id;
-  __u64 timestamp;                        /* Registration timestamp */
-  struct scx_ossim_coord_list coord_list; /* Coordination list for this vCPU */
+  u32 vm_id;
+  u32 vcpu_id;
+  u64 timestamp; /* Registration timestamp */
+  struct scx_ossim_sync_scope sync_scope;
 };
 
 #endif /* __SCX_OSSIM_H */
