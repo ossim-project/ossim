@@ -115,22 +115,22 @@ int ossim_ctl_remove_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
  * ossim_ctl_set_coordination_list - Set entire coordination list for a vCPU
  * @ctl: Connection handle
  * @vcpu_tid: Thread ID of the vCPU to modify
- * @coord_list: Coordination list containing TIDs to set
+ * @sync_scope: Synchronization scope containing TIDs to set
  *
  * Returns: OSSIM_OK on success, negative error code on failure
  */
 int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
-                                    struct ossim_coord_list *coord_list);
+                                    struct ossim_sync_scope *sync_scope);
 
 /**
  * ossim_ctl_get_global_coordination_list - Get the global coordination list
  * @ctl: Connection handle
- * @coord_list: Output buffer for global coordination list
+ * @sync_scope: Output buffer for global coordination list
  *
  * Returns: OSSIM_OK on success, negative error code on failure
  */
 int ossim_ctl_get_global_coordination_list(struct ossim_ctl *ctl,
-                                           struct ossim_coord_list *coord_list);
+                                           struct ossim_sync_scope *sync_scope);
 
 /**
  * ossim_ctl_add_global_coordination - Add a TID to the global coordination list
@@ -154,12 +154,12 @@ int ossim_ctl_remove_global_coordination(struct ossim_ctl *ctl, pid_t tid);
 /**
  * ossim_ctl_set_global_coordination_list - Set entire global coordination list
  * @ctl: Connection handle
- * @coord_list: Coordination list containing TIDs to set
+ * @sync_scope: Synchronization scope containing TIDs to set
  *
  * Returns: OSSIM_OK on success, negative error code on failure
  */
 int ossim_ctl_set_global_coordination_list(struct ossim_ctl *ctl,
-                                           struct ossim_coord_list *coord_list);
+                                           struct ossim_sync_scope *sync_scope);
 
 /**
  * ossim_strerror - Get error message for error code

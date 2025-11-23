@@ -18,12 +18,12 @@ struct ossim_ctl_vcpu_registration {
 } __attribute__((packed));
 
 /* Maximum vCPUs that a single vCPU can coordinate with */
-#define OSSIM_MAX_COORD_VCPUS 32
+#define OSSIM_MAX_SYNC_SCOPE_SIZE 32
 
-/* Coordination list for managing vCPU relationships */
-struct ossim_coord_list {
-  uint32_t count;                    /* Number of TIDs in the list */
-  pid_t tids[OSSIM_MAX_COORD_VCPUS]; /* Array of vCPU TIDs */
+/* Synchronization scope for managing vCPU relationships */
+struct ossim_sync_scope {
+  uint32_t count;                        /* Number of TIDs in the list */
+  pid_t tids[OSSIM_MAX_SYNC_SCOPE_SIZE]; /* Array of vCPU TIDs */
 };
 
 /* vCPU metadata returned from query */
@@ -31,8 +31,8 @@ struct ossim_vcpu_metadata {
   pid_t tid;
   uint32_t vm_id;
   uint32_t vcpu_id;
-  uint64_t timestamp;
-  struct ossim_coord_list coord_list; /* Coordination list for this vCPU */
+  uint64_t simt;                      /* Current simulated time */
+  struct ossim_sync_scope sync_scope; /* Synchronization scope for this vCPU */
 };
 
 /* Scheduler statistics */

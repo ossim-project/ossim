@@ -44,7 +44,7 @@ message VcpuMetadata {
   int32 tid = 1;
   uint32 vm_id = 2;
   uint32 vcpu_id = 3;
-  uint64 timestamp = 4;
+  uint64 simt = 4;
   uint32 coord_count = 5;
   repeated int32 coord_vcpus = 6;
 }

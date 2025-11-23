@@ -79,8 +79,7 @@ struct scx_ossim_vcpu_metadata {
   pid_t tid;
   u32 vm_id;
   u32 vcpu_id;
-  u64 timestamp; /* Registration timestamp */
-  u64 simt;      /* Current simulated time */
+  u64 simt;
   struct scx_ossim_sync_scope sync_scope;
 };
 

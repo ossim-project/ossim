@@ -94,14 +94,14 @@ static int send_command(const char *command) {
       struct ossim_vcpu_metadata metadata;
       ret = ossim_ctl_query_vcpu(ctl, tid, &metadata);
       if (ret == OSSIM_OK) {
-        printf("vCPU metadata: tid=%d vm_id=%u vcpu_id=%u timestamp=%lu "
+        printf("vCPU metadata: tid=%d vm_id=%u vcpu_id=%u simt=%lu "
                "coord_count=%u\n",
-               metadata.tid, metadata.vm_id, metadata.vcpu_id,
-               metadata.timestamp, metadata.coord_list.count);
-        if (metadata.coord_list.count > 0) {
+               metadata.tid, metadata.vm_id, metadata.vcpu_id, metadata.simt,
+               metadata.sync_scope.count);
+        if (metadata.sync_scope.count > 0) {
           printf("Coordination list:");
-          for (uint32_t i = 0; i < metadata.coord_list.count; i++) {
-            printf(" %d", metadata.coord_list.tids[i]);
+          for (uint32_t i = 0; i < metadata.sync_scope.count; i++) {
+            printf(" %d", metadata.sync_scope.tids[i]);
           }
           printf("\n");
         }
@@ -158,7 +158,7 @@ static int send_command(const char *command) {
   } else if (strncmp(command, "set_coord_list ", 15) == 0) {
     /* Parse: set_coord_list <vcpu_tid> <tid1> <tid2> ... */
     pid_t vcpu_tid;
-    struct ossim_coord_list coord_list = {.count = 0};
+    struct ossim_sync_scope sync_scope = {.count = 0};
     const char *arg_start = command + 15;
     char *endptr;
 
@@ -174,18 +174,18 @@ static int send_command(const char *command) {
 
     /* Parse remaining TIDs */
     arg_start = endptr;
-    while (*arg_start && coord_list.count < OSSIM_MAX_COORD_VCPUS) {
+    while (*arg_start && sync_scope.count < OSSIM_MAX_SYNC_SCOPE_SIZE) {
       pid_t tid = strtol(arg_start, &endptr, 10);
       if (endptr == arg_start)
         break;
-      coord_list.tids[coord_list.count++] = tid;
+      sync_scope.tids[sync_scope.count++] = tid;
       arg_start = endptr;
     }
 
-    ret = ossim_ctl_set_coordination_list(ctl, vcpu_tid, &coord_list);
+    ret = ossim_ctl_set_coordination_list(ctl, vcpu_tid, &sync_scope);
     if (ret == OSSIM_OK) {
       printf("Set coordination list for vCPU %d with %u entries\n", vcpu_tid,
-             coord_list.count);
+             sync_scope.count);
     } else {
       fprintf(stderr, "Failed to set coordination list: %s\n",
               ossim_strerror(ret));
@@ -193,12 +193,12 @@ static int send_command(const char *command) {
       return -1;
     }
   } else if (strcmp(command, "get_global_coord") == 0) {
-    struct ossim_coord_list coord_list;
-    ret = ossim_ctl_get_global_coordination_list(ctl, &coord_list);
+    struct ossim_sync_scope sync_scope;
+    ret = ossim_ctl_get_global_coordination_list(ctl, &sync_scope);
     if (ret == OSSIM_OK) {
-      printf("Global coordination list (count=%u):", coord_list.count);
-      for (uint32_t i = 0; i < coord_list.count; i++) {
-        printf(" %d", coord_list.tids[i]);
+      printf("Global coordination list (count=%u):", sync_scope.count);
+      for (uint32_t i = 0; i < sync_scope.count; i++) {
+        printf(" %d", sync_scope.tids[i]);
       }
       printf("\n");
     } else {
@@ -245,23 +245,23 @@ static int send_command(const char *command) {
     }
   } else if (strncmp(command, "set_global_coord_list ", 22) == 0) {
     /* Parse: set_global_coord_list <tid1> <tid2> ... */
-    struct ossim_coord_list coord_list = {.count = 0};
+    struct ossim_sync_scope sync_scope = {.count = 0};
     const char *arg_start = command + 22;
     char *endptr;
 
     /* Parse TIDs */
-    while (*arg_start && coord_list.count < OSSIM_MAX_COORD_VCPUS) {
+    while (*arg_start && sync_scope.count < OSSIM_MAX_SYNC_SCOPE_SIZE) {
       pid_t tid = strtol(arg_start, &endptr, 10);
       if (endptr == arg_start)
         break;
-      coord_list.tids[coord_list.count++] = tid;
+      sync_scope.tids[sync_scope.count++] = tid;
       arg_start = endptr;
     }
 
-    ret = ossim_ctl_set_global_coordination_list(ctl, &coord_list);
+    ret = ossim_ctl_set_global_coordination_list(ctl, &sync_scope);
     if (ret == OSSIM_OK) {
       printf("Set global coordination list with %u entries\n",
-             coord_list.count);
+             sync_scope.count);
     } else {
       fprintf(stderr, "Failed to set global coordination list: %s\n",
               ossim_strerror(ret));
