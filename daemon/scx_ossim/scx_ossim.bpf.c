@@ -19,8 +19,9 @@ UEI_DEFINE(uei);
 
 enum sched_node_status {
   /* TODO: Currently there can be race condition where a thread is not enquable
-   * but in this state. This will be fixed after separating global events and
-   * per-vCPU events. Also See `process_events()`.
+   * but in this state (when a vCPU is registered when blocked). This will be
+   * fixed after separating global events and per-vCPU events. See
+   * `process_events()` and TODO.md.
    */
   SCHED_NODE_STATUS_ENQUABLE = 1,
   SCHED_NODE_STATUS_ENQUEUED,
@@ -172,8 +173,8 @@ static struct sched_grp *get_global_sched_grp(void) {
 
 /* Synchronization scope helper functions
  *
- * TODO: Consider whether we need to protect each synchronization scope
- * with a spinlock.
+ * TODO: Consider protecting (global) synchronization scope with RCU. See
+ * TODO.md
  */
 static void sync_scope_add(struct scx_ossim_sync_scope *scope, pid_t tid) {
   if (!scope || scope->count >= SCX_OSSIM_MAX_COORD_VCPUS)
@@ -241,7 +242,6 @@ static u64 sync_scope_get_min_simt(struct scx_ossim_sync_scope *scope,
   return min_simt == SCX_OSSIM_SIMT_MAX ? default_t : min_simt;
 }
 
-/* TODO: We may want to protect this with a spinlock */
 static u64 global_sync_scope_get_min_simt_update(void) {
   u64 current_min = sync_scope_get_min_simt(&global_sync_scope, 0);
 
@@ -275,10 +275,7 @@ static void unregister_vcpu(pid_t tid) {
 }
 
 /* Process pending events from the unified queue */
-
-// TODO: Let's separate global events and per-vCPU events
-//   - For global events, we process it in the daemon threas's context.
-//   - For per-vCPU events, we process it in the vCPU's context.
+// TODO: Let's separate global events and per-vCPU events. See TODO.md
 static void process_events(void) {
   struct scx_ossim_event event;
   int ret;
@@ -297,7 +294,6 @@ static void process_events(void) {
           .tid = event.vcpu_reg.tid,
           .vm_id = event.vcpu_reg.vm_id,
           .vcpu_id = event.vcpu_reg.vcpu_id,
-          .timestamp = bpf_ktime_get_ns(),
           .simt = global_simt,
           .sync_scope = {.count = 0},
       };

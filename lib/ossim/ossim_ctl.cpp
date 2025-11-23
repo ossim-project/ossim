@@ -235,11 +235,11 @@ int ossim_ctl_query_vcpu(struct ossim_ctl *ctl, pid_t tid,
     metadata->tid = vcpu_meta.tid();
     metadata->vm_id = vcpu_meta.vm_id();
     metadata->vcpu_id = vcpu_meta.vcpu_id();
-    metadata->timestamp = vcpu_meta.timestamp();
-    metadata->coord_list.count = vcpu_meta.coord_count();
+    metadata->simt = vcpu_meta.simt();
+    metadata->sync_scope.count = vcpu_meta.coord_count();
     for (uint32_t i = 0;
-         i < vcpu_meta.coord_count() && i < OSSIM_MAX_COORD_VCPUS; i++) {
-      metadata->coord_list.tids[i] = vcpu_meta.coord_vcpus(i);
+         i < vcpu_meta.coord_count() && i < OSSIM_MAX_SYNC_SCOPE_SIZE; i++) {
+      metadata->sync_scope.tids[i] = vcpu_meta.coord_vcpus(i);
     }
 
     return OSSIM_OK;
@@ -322,8 +322,8 @@ int ossim_ctl_remove_coordination(struct ossim_ctl *ctl, pid_t vcpu_tid,
  * ossim_ctl_set_coordination_list - Set entire coordination list for a vCPU
  */
 int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
-                                    struct ossim_coord_list *coord_list) {
-  if (!ctl || !coord_list) {
+                                    struct ossim_sync_scope *sync_scope) {
+  if (!ctl || !sync_scope) {
     return OSSIM_ERR_INVALID;
   }
 
@@ -333,8 +333,8 @@ int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
     ossim::SetCoordinationListResponse response;
 
     request.set_vcpu_tid(vcpu_tid);
-    for (uint32_t i = 0; i < coord_list->count; i++) {
-      request.add_related_tids(coord_list->tids[i]);
+    for (uint32_t i = 0; i < sync_scope->count; i++) {
+      request.add_related_tids(sync_scope->tids[i]);
     }
 
     grpc::Status status =
@@ -359,8 +359,8 @@ int ossim_ctl_set_coordination_list(struct ossim_ctl *ctl, pid_t vcpu_tid,
  * ossim_ctl_get_global_coordination_list - Get the global coordination list
  */
 int ossim_ctl_get_global_coordination_list(
-    struct ossim_ctl *ctl, struct ossim_coord_list *coord_list) {
-  if (!ctl || !coord_list) {
+    struct ossim_ctl *ctl, struct ossim_sync_scope *sync_scope) {
+  if (!ctl || !sync_scope) {
     return OSSIM_ERR_INVALID;
   }
 
@@ -381,10 +381,10 @@ int ossim_ctl_get_global_coordination_list(
       return OSSIM_ERR_UNKNOWN;
     }
 
-    coord_list->count = response.tids_size();
-    for (int i = 0; i < response.tids_size() && i < OSSIM_MAX_COORD_VCPUS;
+    sync_scope->count = response.tids_size();
+    for (int i = 0; i < response.tids_size() && i < OSSIM_MAX_SYNC_SCOPE_SIZE;
          i++) {
-      coord_list->tids[i] = response.tids(i);
+      sync_scope->tids[i] = response.tids(i);
     }
 
     return OSSIM_OK;
@@ -464,8 +464,8 @@ int ossim_ctl_remove_global_coordination(struct ossim_ctl *ctl, pid_t tid) {
  * ossim_ctl_set_global_coordination_list - Set entire global coordination list
  */
 int ossim_ctl_set_global_coordination_list(
-    struct ossim_ctl *ctl, struct ossim_coord_list *coord_list) {
-  if (!ctl || !coord_list) {
+    struct ossim_ctl *ctl, struct ossim_sync_scope *sync_scope) {
+  if (!ctl || !sync_scope) {
     return OSSIM_ERR_INVALID;
   }
 
@@ -474,8 +474,8 @@ int ossim_ctl_set_global_coordination_list(
     ossim::SetGlobalCoordinationListRequest request;
     ossim::SetGlobalCoordinationListResponse response;
 
-    for (uint32_t i = 0; i < coord_list->count; i++) {
-      request.add_tids(coord_list->tids[i]);
+    for (uint32_t i = 0; i < sync_scope->count; i++) {
+      request.add_tids(sync_scope->tids[i]);
     }
 
     grpc::Status status =

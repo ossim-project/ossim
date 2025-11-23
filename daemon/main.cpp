@@ -88,9 +88,8 @@ static void print_registered_vcpus(struct scx_ossim *skel) {
   key = 0;
   while (bpf_map_get_next_key(map_fd, &key, &next_key) == 0) {
     if (bpf_map_lookup_elem(map_fd, &next_key, &metadata) == 0) {
-      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u timestamp=%lu\n", count,
-             metadata.tid, metadata.vm_id, metadata.vcpu_id,
-             metadata.timestamp);
+      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u simt=%lu\n", count,
+             metadata.tid, metadata.vm_id, metadata.vcpu_id, metadata.simt);
       count++;
     }
     key = next_key;
@@ -227,7 +226,7 @@ public:
       vcpu_meta->set_tid(metadata.tid);
       vcpu_meta->set_vm_id(metadata.vm_id);
       vcpu_meta->set_vcpu_id(metadata.vcpu_id);
-      vcpu_meta->set_timestamp(metadata.timestamp);
+      vcpu_meta->set_simt(metadata.simt);
       vcpu_meta->set_coord_count(metadata.sync_scope.count);
       for (__u32 i = 0; i < metadata.sync_scope.count; i++) {
         vcpu_meta->add_coord_vcpus(metadata.sync_scope.tids[i]);
