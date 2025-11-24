@@ -37,7 +37,7 @@ $(b)meta-data:
 
 .PHONY: myqemu-test
 myqemu-test: $(test_dimg)
-	sudo -E $(myqemu) -machine q35,accel=kvm -cpu host -smp $(TEST_VM_CPUS) -m $(TEST_VM_MEMORY) \
+	sudo -i $(myqemu) -machine q35,accel=kvm -cpu host -smp $(TEST_VM_CPUS) -m $(TEST_VM_MEMORY) \
 	-object memory-backend-memfd,id=mem0,size=$(TEST_VM_MEMORY),share=on \
 	-numa node,memdev=mem0 \
 	-drive file=$(test_dimg),media=disk,format=qcow2,if=virtio,index=0 \

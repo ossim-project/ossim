@@ -1,18 +1,25 @@
 libossim_d := $(d)lib/ossim/
+libossim_b := $(b)lib/ossim/
 
 # Build libossim (required for ossim integration)
-.PHONY: build-libossim
-build-libossim:
-	$(MAKE) -C $(libossim_d)
+.PHONY: lib
+lib:
+	$(MAKE) -C $(libossim_d) O=$(libossim_b)
 
-# Install libossim to PREFIX/lib
-.PHONY: install-libossim
-install-libossim: build-libossim
-	@mkdir -p $(PREFIX)lib
-	cp $(libossim_d)libossim.so $(PREFIX)lib/
-	cp $(libossim_d)libossim.a $(PREFIX)lib/
+# Install libossim to PREFIX
+.PHONY: install-lib
+install-lib: lib
+	$(MAKE) -C $(libossim_d) O=$(libossim_b) PREFIX=$(PREFIX) install
+
+.PHONY: lib-test
+lib-test: lib
+	$(MAKE) -C $(libossim_d) O=$(libossim_b) test-build
+
+.PHONY: clean-lib-test
+clean-lib-test:
+	$(MAKE) -C $(libossim_d) O=$(libossim_b) test-clean
 
 # Clean libossim
-.PHONY: clean-libossim
-clean-libossim:
-	$(MAKE) -C $(libossim_d) clean
+.PHONY: clean-lib
+clean-lib: clean-lib-test
+	$(MAKE) -C $(libossim_d) O=$(libossim_b) clean
