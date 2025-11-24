@@ -8,6 +8,16 @@
 #include "vmlinux.h"
 #endif
 
+enum scx_ossim_stat_type {
+  SCX_OSSIM_STAT_LOCAL_ENQUEUE = 0,
+  SCX_OSSIM_STAT_GLOBAL_ENQUEUE,
+  SCX_OSSIM_STAT_SYSTEM_ENQUEUE,
+  SCX_OSSIM_STAT_VCPU_ENQUEUE,
+  SCX_OSSIM_STAT_VCPU_NOENQUABLE,
+  SCX_OSSIM_STAT_VCPU_ENQUABLE_TOO_EARLY,
+  SCX_OSSIM_NUM_STAT,
+};
+
 /* In scx_ossim, `simt` serves as the abbreviation for `simulated time` */
 #define SCX_OSSIM_SIMT_MAX ((u64)(-1))
 
@@ -66,12 +76,12 @@ struct scx_ossim_event {
 };
 
 /* Maximum vCPUs that a single vCPU can coordinate with */
-#define SCX_OSSIM_MAX_COORD_VCPUS 8
+#define SCX_OSSIM_MAX_SYNC_SCOPE_SIZE 64
 
 /* Coordination domain structure (used for both per-vCPU and global lists) */
 struct scx_ossim_sync_scope {
-  u32 count;                             /* Number of TIDs in the list */
-  pid_t tids[SCX_OSSIM_MAX_COORD_VCPUS]; /* Array of TIDs */
+  u32 count;                                 /* Number of TIDs in the list */
+  pid_t tids[SCX_OSSIM_MAX_SYNC_SCOPE_SIZE]; /* Array of TIDs */
 };
 
 /* Metadata stored for each registered vCPU */
@@ -80,6 +90,7 @@ struct scx_ossim_vcpu_metadata {
   u32 vm_id;
   u32 vcpu_id;
   u64 simt;
+  bool blocked;
   struct scx_ossim_sync_scope sync_scope;
 };
 
