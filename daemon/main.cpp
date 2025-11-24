@@ -29,14 +29,16 @@ const char help_fmt[] =
     "\n"
     "See the top-level comment in .bpf.c for more details.\n"
     "\n"
-    "Usage: %s [-v] [-h]\n"
+    "Usage: %s [-v] [-h] [-e EPOCH_NS]\n"
     "\n"
     "  -v            Print libbpf debug messages\n"
+    "  -e EPOCH_NS   Set SIMT epoch in nanoseconds (default: 100000 = 0.1ms)\n"
     "  -h            Display this help and exit\n";
 
 static bool verbose = false;
 static volatile int exit_req = 0;
 static struct scx_ossim *global_skel = nullptr;
+static __u64 simt_epoch_ns = 100000; /* default: 0.1 ms */
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
                            va_list args) {
@@ -50,16 +52,15 @@ static void sigint_handler(int simple) { exit_req = 1; }
 static void read_stats(struct scx_ossim *skel, __u64 *stats) {
   int nr_cpus = libbpf_num_possible_cpus();
   assert(nr_cpus > 0);
-  __u64 *cnts[4];
-  cnts[0] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
-  cnts[1] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
-  cnts[2] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
-  cnts[3] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
+  __u64 *cnts[SCX_OSSIM_NUM_STAT];
+  for (int i = 0; i < SCX_OSSIM_NUM_STAT; i++) {
+    cnts[i] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
+  }
   __u32 idx;
 
-  memset(stats, 0, sizeof(stats[0]) * 4);
+  memset(stats, 0, sizeof(stats[0]) * SCX_OSSIM_NUM_STAT);
 
-  for (idx = 0; idx < 4; idx++) {
+  for (idx = 0; idx < SCX_OSSIM_NUM_STAT; idx++) {
     int ret, cpu;
 
     ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.stats), &idx, cnts[idx]);
@@ -69,10 +70,9 @@ static void read_stats(struct scx_ossim *skel, __u64 *stats) {
       stats[idx] += cnts[idx][cpu];
   }
 
-  free(cnts[0]);
-  free(cnts[1]);
-  free(cnts[2]);
-  free(cnts[3]);
+  for (idx = 0; idx < SCX_OSSIM_NUM_STAT; idx++) {
+    free(cnts[idx]);
+  }
 }
 
 /* Print registered vCPUs */
@@ -300,7 +300,7 @@ public:
     int queue_fd = bpf_map__fd(skel_->maps.event_queue);
 
     // Check if the new coordination list is too large
-    if (request->related_tids_size() > SCX_OSSIM_MAX_COORD_VCPUS) {
+    if (request->related_tids_size() > SCX_OSSIM_MAX_SYNC_SCOPE_SIZE) {
       response->set_success(false);
       response->set_message("Coordination list exceeds maximum size");
       return grpc::Status::OK;
@@ -356,8 +356,8 @@ public:
 
     response->set_success(true);
     response->set_message("Global coordination list retrieved");
-    for (__u32 i = 0; i < sync_scope->count && i < SCX_OSSIM_MAX_COORD_VCPUS;
-         i++) {
+    for (__u32 i = 0;
+         i < sync_scope->count && i < SCX_OSSIM_MAX_SYNC_SCOPE_SIZE; i++) {
       response->add_tids(sync_scope->tids[i]);
     }
 
@@ -423,7 +423,7 @@ public:
     int queue_fd = bpf_map__fd(skel_->maps.event_queue);
 
     // Check if the list is too large
-    if (request->tids_size() > SCX_OSSIM_MAX_COORD_VCPUS) {
+    if (request->tids_size() > SCX_OSSIM_MAX_SYNC_SCOPE_SIZE) {
       response->set_success(false);
       response->set_message("Global coordination list exceeds maximum size");
       return grpc::Status::OK;
@@ -557,10 +557,17 @@ int main(int argc, char **argv) {
 restart:
   skel = SCX_OPS_OPEN(ossim_ops, scx_ossim);
 
-  while ((opt = getopt(argc, argv, "vh")) != -1) {
+  while ((opt = getopt(argc, argv, "ve:h")) != -1) {
     switch (opt) {
     case 'v':
       verbose = true;
+      break;
+    case 'e':
+      simt_epoch_ns = strtoull(optarg, NULL, 10);
+      if (simt_epoch_ns == 0) {
+        fprintf(stderr, "Invalid SIMT epoch value: %s\n", optarg);
+        return 1;
+      }
       break;
     case 'h':
       fprintf(stderr, help_fmt, basename(argv[0]));
@@ -571,7 +578,7 @@ restart:
     }
   }
 
-  skel->bss->simt_epoch = 1000000; /* 1ms by default */
+  skel->bss->simt_epoch = simt_epoch_ns;
 
   SCX_OPS_LOAD(skel, ossim_ops, scx_ossim, uei);
   link = SCX_OPS_ATTACH(skel, ossim_ops, scx_ossim);
@@ -584,11 +591,18 @@ restart:
 
   /* Main stats display loop */
   while (!exit_req && !UEI_EXITED(skel, uei)) {
-    __u64 stats[4];
+    __u64 stats[SCX_OSSIM_NUM_STAT];
 
     read_stats(skel, stats);
-    printf("local=%llu global=%llu vcpu=%llu system=%llu\n", stats[0], stats[1],
-           stats[2], stats[3]);
+    printf("[global_simt=%lu]\n", skel->bss->global_simt);
+    printf("local=%llu global=%llu vcpu=%llu system=%llu vcpu_noenquable=%llu "
+           "vcpu_enquable_too_early=%llu\n",
+           stats[SCX_OSSIM_STAT_LOCAL_ENQUEUE],
+           stats[SCX_OSSIM_STAT_GLOBAL_ENQUEUE],
+           stats[SCX_OSSIM_STAT_VCPU_ENQUEUE],
+           stats[SCX_OSSIM_STAT_SYSTEM_ENQUEUE],
+           stats[SCX_OSSIM_STAT_VCPU_NOENQUABLE],
+           stats[SCX_OSSIM_STAT_VCPU_ENQUABLE_TOO_EARLY]);
     print_registered_vcpus(skel);
     printf("\n");
     fflush(stdout);
