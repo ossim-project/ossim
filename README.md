@@ -6,7 +6,7 @@ Please check `docs/ossim.pdf` for an overview of the project's vision.
 
 Prerequisites:
 
-- X86 machine with Ubuntu 25.10
+- X86 machine with **Ubuntu 25.10**
 - KVM is available
 - `sudo` is enabled for the current user
 
@@ -18,7 +18,7 @@ You may also want to configure the following environment variables:
 
 Steps:
 
-1. Update `PATH` and `LD_LIBRARY_PATH` to include the prefix:
+1. Update environment variables to include the `OSSIM_PREFIX`:
     ```sh
     export PATH=${OSSIM_PREFIX}/bin${PATH:+:$PATH}
     export LD_LIBRARY_PATH=${OSSIM_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
@@ -27,7 +27,7 @@ Steps:
     export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 
     ```
-    You may want to persist these changes in `/etc/profile.d/ossim.sh`, so that it can be also seem by `sudo -i`. (`sudo -E` is not currently supported by `sudo-rs`, which is the default in Ubuntu 25.10.)
+    You may want to persist these changes in `/etc/profile.d/ossim.sh`, so that it can be also seem by `sudo -i`. (`sudo -E` is not supported by `sudo-rs` (default in Ubuntu 25.10.), as for November 2025.)
 
 2. Install dependencies:
 
@@ -52,15 +52,15 @@ Steps:
 4. Initialize submodules:
 
     ```sh
-    git submodule update --init --depth 1 linux
     git submodule update --init --recursive --depth 1 qemu
+    # git submodule update --init --depth 1 linux
     ```
 
-5. Build QEMU
+5. Build and install QEMU
 
     ```sh
     make configure-qemu
-    make build-qemu
+    make install-qemu
     ```
 
 ## Run Big Data Applications
