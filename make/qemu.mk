@@ -1,32 +1,30 @@
 qemu_d := $(d)qemu/
 qemu_b := $(b)qemu/
-qemu_o := $(o)qemu/
 myqemu := $(PREFIX)bin/qemu-system-x86_64
 
-$(myqemu) := configure-qemu build-qemu
 
-.PHONY: configure-qemu
-configure-qemu:
+.PHONY: myqemu
+myqemu: $(myqemu)
+
+$(myqemu): build-qemu
+
+configure-qemu: install-lib
 	@mkdir -p $(qemu_b)
-	@mkdir -p $(qemu_o)
 	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
-		--prefix=$(abspath $(qemu_o)) \
+		--prefix=$(abspath $(PREFIX)) \
 		--target-list=x86_64-softmmu \
 		--enable-numa \
 		--enable-slirp \
-		--enable-kvm
+		--enable-kvm \
+		--enable-ossim
 
-$(qemu_b)Makefile: configure-qemu
-	@mkdir -p $(qemu_b)
-	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
-		--prefix=$(realpath $(PREFIX)) \
-		--target-list=x86_64-softmmu
-
-.PHONY: build-qemu
-build-qemu: $(qemu_b)Makefile
+qemu: install-lib
 	$(MAKE) -C $(qemu_b) -j`nproc`
+
+install-qemu: qemu
 	$(MAKE) -C $(qemu_b) install
 
-.PHONY: clean-qemu
 clean-qemu:
-	rm -rf $(qemu_b) $(qemu_o)
+	rm -rf $(qemu_b)
+
+.PHONY: configure-qemu qemu install-qemu clean-qemu

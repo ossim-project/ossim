@@ -1,5 +1,5 @@
 #cloud-config
-hostname: ossim-dev-vm
+hostname: ossim-test
 ssh_pwauth: true
 disable_root: false 
 users:
