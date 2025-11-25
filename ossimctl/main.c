@@ -1,3 +1,9 @@
+/* ossimctl - Command-line control tool for ossimd scheduler
+ *
+ * This tool provides a CLI interface for communicating with the ossimd
+ * scheduler daemon via the libossim library.
+ */
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +22,7 @@ static int send_command(const char *command) {
   ctl = ossim_ctl_connect(NULL);
   if (!ctl) {
     fprintf(stderr, "Failed to connect: %s\n", strerror(errno));
-    fprintf(stderr, "Make sure scx_ossim is running\n");
+    fprintf(stderr, "Make sure ossimd is running\n");
     return -1;
   }
 
@@ -95,11 +101,11 @@ static int send_command(const char *command) {
       ret = ossim_ctl_query_vcpu(ctl, tid, &metadata);
       if (ret == OSSIM_OK) {
         printf("vCPU metadata: tid=%d vm_id=%u vcpu_id=%u simt=%lu "
-               "coord_count=%u\n",
+               "sync_scope_size=%u\n",
                metadata.tid, metadata.vm_id, metadata.vcpu_id, metadata.simt,
                metadata.sync_scope.count);
         if (metadata.sync_scope.count > 0) {
-          printf("Coordination list:");
+          printf("Synchronization scope:");
           for (uint32_t i = 0; i < metadata.sync_scope.count; i++) {
             printf(" %d", metadata.sync_scope.tids[i]);
           }
@@ -115,48 +121,48 @@ static int send_command(const char *command) {
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strncmp(command, "add_coord ", 10) == 0) {
-    /* Parse: add_coord <vcpu_tid> <related_tid> */
+  } else if (strncmp(command, "add_sync ", 9) == 0) {
+    /* Parse: add_sync <vcpu_tid> <related_tid> */
     pid_t vcpu_tid, related_tid;
-    if (sscanf(command + 10, "%d %d", &vcpu_tid, &related_tid) == 2) {
+    if (sscanf(command + 9, "%d %d", &vcpu_tid, &related_tid) == 2) {
       ret = ossim_ctl_add_coordination(ctl, vcpu_tid, related_tid);
       if (ret == OSSIM_OK) {
-        printf("Added vCPU %d to coordination list of vCPU %d\n", related_tid,
-               vcpu_tid);
-      } else {
-        fprintf(stderr, "Failed to add coordination: %s\n",
-                ossim_strerror(ret));
-        ossim_ctl_disconnect(ctl);
-        return -1;
-      }
-    } else {
-      fprintf(stderr,
-              "Invalid format. Use: add_coord <vcpu_tid> <related_tid>\n");
-      ossim_ctl_disconnect(ctl);
-      return -1;
-    }
-  } else if (strncmp(command, "remove_coord ", 13) == 0) {
-    /* Parse: remove_coord <vcpu_tid> <related_tid> */
-    pid_t vcpu_tid, related_tid;
-    if (sscanf(command + 13, "%d %d", &vcpu_tid, &related_tid) == 2) {
-      ret = ossim_ctl_remove_coordination(ctl, vcpu_tid, related_tid);
-      if (ret == OSSIM_OK) {
-        printf("Removed vCPU %d from coordination list of vCPU %d\n",
+        printf("Added vCPU %d to synchronization scope of vCPU %d\n",
                related_tid, vcpu_tid);
       } else {
-        fprintf(stderr, "Failed to remove coordination: %s\n",
+        fprintf(stderr, "Failed to add to synchronization scope: %s\n",
                 ossim_strerror(ret));
         ossim_ctl_disconnect(ctl);
         return -1;
       }
     } else {
       fprintf(stderr,
-              "Invalid format. Use: remove_coord <vcpu_tid> <related_tid>\n");
+              "Invalid format. Use: add_sync <vcpu_tid> <related_tid>\n");
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strncmp(command, "set_coord_list ", 15) == 0) {
-    /* Parse: set_coord_list <vcpu_tid> <tid1> <tid2> ... */
+  } else if (strncmp(command, "remove_sync ", 12) == 0) {
+    /* Parse: remove_sync <vcpu_tid> <related_tid> */
+    pid_t vcpu_tid, related_tid;
+    if (sscanf(command + 12, "%d %d", &vcpu_tid, &related_tid) == 2) {
+      ret = ossim_ctl_remove_coordination(ctl, vcpu_tid, related_tid);
+      if (ret == OSSIM_OK) {
+        printf("Removed vCPU %d from synchronization scope of vCPU %d\n",
+               related_tid, vcpu_tid);
+      } else {
+        fprintf(stderr, "Failed to remove from synchronization scope: %s\n",
+                ossim_strerror(ret));
+        ossim_ctl_disconnect(ctl);
+        return -1;
+      }
+    } else {
+      fprintf(stderr,
+              "Invalid format. Use: remove_sync <vcpu_tid> <related_tid>\n");
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strncmp(command, "set_sync_scope ", 15) == 0) {
+    /* Parse: set_sync_scope <vcpu_tid> <tid1> <tid2> ... */
     pid_t vcpu_tid;
     struct ossim_sync_scope sync_scope = {.count = 0};
     const char *arg_start = command + 15;
@@ -167,7 +173,7 @@ static int send_command(const char *command) {
     if (endptr == arg_start) {
       fprintf(
           stderr,
-          "Invalid format. Use: set_coord_list <vcpu_tid> <tid1> <tid2> ...\n");
+          "Invalid format. Use: set_sync_scope <vcpu_tid> <tid1> <tid2> ...\n");
       ossim_ctl_disconnect(ctl);
       return -1;
     }
@@ -184,67 +190,68 @@ static int send_command(const char *command) {
 
     ret = ossim_ctl_set_coordination_list(ctl, vcpu_tid, &sync_scope);
     if (ret == OSSIM_OK) {
-      printf("Set coordination list for vCPU %d with %u entries\n", vcpu_tid,
-             sync_scope.count);
+      printf("Set synchronization scope for vCPU %d with %u entries\n",
+             vcpu_tid, sync_scope.count);
     } else {
-      fprintf(stderr, "Failed to set coordination list: %s\n",
+      fprintf(stderr, "Failed to set synchronization scope: %s\n",
               ossim_strerror(ret));
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strcmp(command, "get_global_coord") == 0) {
+  } else if (strcmp(command, "get_global_sync_scope") == 0) {
     struct ossim_sync_scope sync_scope;
     ret = ossim_ctl_get_global_coordination_list(ctl, &sync_scope);
     if (ret == OSSIM_OK) {
-      printf("Global coordination list (count=%u):", sync_scope.count);
+      printf("Global synchronization scope (size=%u):", sync_scope.count);
       for (uint32_t i = 0; i < sync_scope.count; i++) {
         printf(" %d", sync_scope.tids[i]);
       }
       printf("\n");
     } else {
-      fprintf(stderr, "Failed to get global coordination list: %s\n",
+      fprintf(stderr, "Failed to get global synchronization scope: %s\n",
               ossim_strerror(ret));
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strncmp(command, "add_global_coord ", 17) == 0) {
-    /* Parse: add_global_coord <tid> */
+  } else if (strncmp(command, "add_global_sync ", 16) == 0) {
+    /* Parse: add_global_sync <tid> */
     pid_t tid;
-    if (sscanf(command + 17, "%d", &tid) == 1) {
+    if (sscanf(command + 16, "%d", &tid) == 1) {
       ret = ossim_ctl_add_global_coordination(ctl, tid);
       if (ret == OSSIM_OK) {
-        printf("Added TID %d to global coordination list\n", tid);
+        printf("Added TID %d to global synchronization scope\n", tid);
       } else {
-        fprintf(stderr, "Failed to add global coordination: %s\n",
+        fprintf(stderr, "Failed to add to global synchronization scope: %s\n",
                 ossim_strerror(ret));
         ossim_ctl_disconnect(ctl);
         return -1;
       }
     } else {
-      fprintf(stderr, "Invalid format. Use: add_global_coord <tid>\n");
+      fprintf(stderr, "Invalid format. Use: add_global_sync <tid>\n");
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strncmp(command, "remove_global_coord ", 20) == 0) {
-    /* Parse: remove_global_coord <tid> */
+  } else if (strncmp(command, "remove_global_sync ", 19) == 0) {
+    /* Parse: remove_global_sync <tid> */
     pid_t tid;
-    if (sscanf(command + 20, "%d", &tid) == 1) {
+    if (sscanf(command + 19, "%d", &tid) == 1) {
       ret = ossim_ctl_remove_global_coordination(ctl, tid);
       if (ret == OSSIM_OK) {
-        printf("Removed TID %d from global coordination list\n", tid);
+        printf("Removed TID %d from global synchronization scope\n", tid);
       } else {
-        fprintf(stderr, "Failed to remove global coordination: %s\n",
+        fprintf(stderr,
+                "Failed to remove from global synchronization scope: %s\n",
                 ossim_strerror(ret));
         ossim_ctl_disconnect(ctl);
         return -1;
       }
     } else {
-      fprintf(stderr, "Invalid format. Use: remove_global_coord <tid>\n");
+      fprintf(stderr, "Invalid format. Use: remove_global_sync <tid>\n");
       ossim_ctl_disconnect(ctl);
       return -1;
     }
-  } else if (strncmp(command, "set_global_coord_list ", 22) == 0) {
-    /* Parse: set_global_coord_list <tid1> <tid2> ... */
+  } else if (strncmp(command, "set_global_sync_scope ", 22) == 0) {
+    /* Parse: set_global_sync_scope <tid1> <tid2> ... */
     struct ossim_sync_scope sync_scope = {.count = 0};
     const char *arg_start = command + 22;
     char *endptr;
@@ -260,10 +267,10 @@ static int send_command(const char *command) {
 
     ret = ossim_ctl_set_global_coordination_list(ctl, &sync_scope);
     if (ret == OSSIM_OK) {
-      printf("Set global coordination list with %u entries\n",
+      printf("Set global synchronization scope with %u entries\n",
              sync_scope.count);
     } else {
-      fprintf(stderr, "Failed to set global coordination list: %s\n",
+      fprintf(stderr, "Failed to set global synchronization scope: %s\n",
               ossim_strerror(ret));
       ossim_ctl_disconnect(ctl);
       return -1;
@@ -278,22 +285,21 @@ static int send_command(const char *command) {
     printf("  unregister_vcpu <tid>              Unregister a vCPU\n");
     printf("  query_vcpu <tid>                   Query vCPU registration "
            "status\n");
-    printf(
-        "  add_coord <vcpu_tid> <related_tid> Add vCPU to coordination list\n");
-    printf("  remove_coord <vcpu_tid> <related_tid>  Remove vCPU from "
-           "coordination "
-           "list\n");
-    printf("  set_coord_list <vcpu_tid> <tid1> <tid2> ...  Set entire "
-           "coordination list\n");
-    printf(
-        "  get_global_coord                   Get global coordination list\n");
-    printf(
-        "  add_global_coord <tid>             Add TID to global coordination "
-        "list\n");
-    printf("  remove_global_coord <tid>          Remove TID from global "
-           "coordination list\n");
-    printf("  set_global_coord_list <tid1> <tid2> ...  Set entire global "
-           "coordination list\n");
+    printf("  add_sync <vcpu_tid> <related_tid>  Add vCPU to synchronization "
+           "scope\n");
+    printf("  remove_sync <vcpu_tid> <related_tid>  Remove vCPU from "
+           "synchronization scope\n");
+    printf("  set_sync_scope <vcpu_tid> <tid1> <tid2> ...  Set entire "
+           "synchronization scope\n");
+    printf("  get_global_sync_scope              Get global synchronization "
+           "scope\n");
+    printf("  add_global_sync <tid>              Add TID to global "
+           "synchronization "
+           "scope\n");
+    printf("  remove_global_sync <tid>           Remove TID from global "
+           "synchronization scope\n");
+    printf("  set_global_sync_scope <tid1> <tid2> ...  Set entire global "
+           "synchronization scope\n");
     printf("  shutdown                           Shutdown the scheduler\n");
     printf("  help                               Show this help message\n");
   } else {
@@ -311,7 +317,7 @@ static int send_command(const char *command) {
 static void interactive_mode(void) {
   char command[256];
 
-  printf("scx_ossim socket client - Interactive mode\n");
+  printf("ossimctl - Ossim control tool\n");
   printf("Type 'help' for available commands, 'quit' to exit\n\n");
 
   while (1) {
@@ -380,20 +386,22 @@ static void print_usage(const char *prog_name) {
   printf("  unregister_vcpu <tid>              Unregister a vCPU\n");
   printf(
       "  query_vcpu <tid>                   Query vCPU registration status\n");
+  printf("  add_sync <vcpu_tid> <related_tid>  Add vCPU to synchronization "
+         "scope\n");
+  printf("  remove_sync <vcpu_tid> <related_tid>  Remove vCPU from "
+         "synchronization "
+         "scope\n");
+  printf("  set_sync_scope <vcpu_tid> <tid1> <tid2> ...  Set entire "
+         "synchronization scope\n");
+  printf("  get_global_sync_scope              Get global synchronization "
+         "scope\n");
   printf(
-      "  add_coord <vcpu_tid> <related_tid> Add vCPU to coordination list\n");
-  printf(
-      "  remove_coord <vcpu_tid> <related_tid>  Remove vCPU from coordination "
-      "list\n");
-  printf("  set_coord_list <vcpu_tid> <tid1> <tid2> ...  Set entire "
-         "coordination list\n");
-  printf("  get_global_coord                   Get global coordination list\n");
-  printf("  add_global_coord <tid>             Add TID to global coordination "
-         "list\n");
-  printf("  remove_global_coord <tid>          Remove TID from global "
-         "coordination list\n");
-  printf("  set_global_coord_list <tid1> <tid2> ...  Set entire global "
-         "coordination list\n");
+      "  add_global_sync <tid>              Add TID to global synchronization "
+      "scope\n");
+  printf("  remove_global_sync <tid>           Remove TID from global "
+         "synchronization scope\n");
+  printf("  set_global_sync_scope <tid1> <tid2> ...  Set entire global "
+         "synchronization scope\n");
   printf("  shutdown                           Shutdown the scheduler\n");
   printf(
       "  help                               Show available server commands\n");
@@ -405,21 +413,24 @@ static void print_usage(const char *prog_name) {
          prog_name);
   printf("  %s query_vcpu 1234                 # Query vCPU with tid=1234\n",
          prog_name);
-  printf("  %s add_coord 1234 5678             # Add vCPU 5678 to coordination "
-         "list of vCPU 1234\n",
-         prog_name);
-  printf("  %s set_coord_list 1234 5678 9012   # Set coordination list of vCPU "
+  printf(
+      "  %s add_sync 1234 5678              # Add vCPU 5678 to synchronization "
+      "scope of vCPU 1234\n",
+      prog_name);
+  printf("  %s set_sync_scope 1234 5678 9012   # Set synchronization scope of "
+         "vCPU "
          "1234 to [5678, 9012]\n",
          prog_name);
+  printf("  %s get_global_sync_scope           # Get global synchronization "
+         "scope\n",
+         prog_name);
+  printf("  %s add_global_sync 1234            # Add TID 1234 to global "
+         "synchronization scope\n",
+         prog_name);
   printf(
-      "  %s get_global_coord                # Get global coordination list\n",
+      "  %s set_global_sync_scope 1234 5678 # Set global synchronization scope "
+      "to [1234, 5678]\n",
       prog_name);
-  printf("  %s add_global_coord 1234           # Add TID 1234 to global "
-         "coordination list\n",
-         prog_name);
-  printf("  %s set_global_coord_list 1234 5678 # Set global coordination list "
-         "to [1234, 5678]\n",
-         prog_name);
   printf(
       "  %s unregister_vcpu 1234            # Unregister vCPU with tid=1234\n",
       prog_name);

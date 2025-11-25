@@ -28,6 +28,7 @@ include make/qemu.mk
 include make/libvirt.mk
 include make/linux.mk
 include make/ossimd.mk
+include make/ossimctl.mk
 
 $(eval $(call include_rules,$(d)utils/rules.mk))
 $(eval $(call include_rules,$(d)images/rules.mk))
