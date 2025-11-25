@@ -1,6 +1,8 @@
 #ifndef OSSIM_OSSIM_CTL_H
 #define OSSIM_OSSIM_CTL_H
 
+#include <stdbool.h>
+
 #include "ossim/config.h"
 #include "ossim/types.h"
 
@@ -160,6 +162,15 @@ int ossim_ctl_remove_global_coordination(struct ossim_ctl *ctl, pid_t tid);
  */
 int ossim_ctl_set_global_coordination_list(struct ossim_ctl *ctl,
                                            struct ossim_sync_scope *sync_scope);
+
+/**
+ * ossim_ctl_set_sync_enabled - Enable or disable synchronized scheduling
+ * @ctl: Connection handle
+ * @enabled: true to enable, false to disable
+ *
+ * Returns: OSSIM_OK on success, negative error code on failure
+ */
+int ossim_ctl_set_sync_enabled(struct ossim_ctl *ctl, bool enabled);
 
 /**
  * ossim_strerror - Get error message for error code

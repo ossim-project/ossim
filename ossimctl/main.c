@@ -67,6 +67,24 @@ static int send_command(const char *command) {
       ossim_ctl_disconnect(ctl);
       return -1;
     }
+  } else if (strcmp(command, "enable_sync") == 0) {
+    ret = ossim_ctl_set_sync_enabled(ctl, 1);
+    if (ret == OSSIM_OK) {
+      printf("Synchronized scheduling enabled\n");
+    } else {
+      fprintf(stderr, "Failed to enable sync: %s\n", ossim_strerror(ret));
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
+  } else if (strcmp(command, "disable_sync") == 0) {
+    ret = ossim_ctl_set_sync_enabled(ctl, 0);
+    if (ret == OSSIM_OK) {
+      printf("Synchronized scheduling disabled\n");
+    } else {
+      fprintf(stderr, "Failed to disable sync: %s\n", ossim_strerror(ret));
+      ossim_ctl_disconnect(ctl);
+      return -1;
+    }
   } else if (strcmp(command, "register_vcpu") == 0) {
     /* Parse: register_vcpu <tid> <vm_id> <vcpu_id> */
     struct ossim_ctl_vcpu_registration vcpu;
@@ -300,6 +318,8 @@ static int send_command(const char *command) {
            "synchronization scope\n");
     printf("  set_global_sync_scope <tid1> <tid2> ...  Set entire global "
            "synchronization scope\n");
+    printf("  enable_sync                        Enable synchronized scheduling\n");
+    printf("  disable_sync                       Disable synchronized scheduling\n");
     printf("  shutdown                           Shutdown the scheduler\n");
     printf("  help                               Show this help message\n");
   } else {
@@ -402,6 +422,8 @@ static void print_usage(const char *prog_name) {
          "synchronization scope\n");
   printf("  set_global_sync_scope <tid1> <tid2> ...  Set entire global "
          "synchronization scope\n");
+  printf("  enable_sync                        Enable synchronized scheduling\n");
+  printf("  disable_sync                       Disable synchronized scheduling\n");
   printf("  shutdown                           Shutdown the scheduler\n");
   printf(
       "  help                               Show available server commands\n");
