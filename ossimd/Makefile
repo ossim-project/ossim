@@ -83,7 +83,7 @@ all: $(OBJ_DIR)/$(TARGET)
 PROTO_DEPS := $(OBJ_DIR)/ossim_rpc.pb.o $(OBJ_DIR)/ossim_rpc.grpc.pb.o
 
 # Proto file location in shared lib directory
-PROTO_DIR := $(SRC_DIR)/../lib/ossim
+PROTO_DIR ?= $(SRC_DIR)/../lib/ossim
 PROTO_FILE := $(PROTO_DIR)/ossim_rpc.proto
 
 LIB_DIR := $(SRC_DIR)/../lib
