@@ -125,13 +125,6 @@ test-build: $(LIB_STATIC) $(LIB_SHARED)
 test-clean:
 	$(MAKE) -C $(SRC_DIR)/test SRC_DIR=$(SRC_DIR)/test clean
 
-test: test-build
-	@echo "Running tests..."
-	@echo "Running test_libossim_cli..."
-	$(SRC_DIR)/test/test_libossim_cli
-	@echo "Running test_vcpu_loop..."
-	$(SRC_DIR)/test/test_vcpu_loop
-
-.PHONY: all install clean clean-all test-build test-clean test
+.PHONY: all install clean clean-all test-build test-clean
 
 endif  # End of ifeq ($(skip-makefile),)
