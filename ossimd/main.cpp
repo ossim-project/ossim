@@ -29,13 +29,15 @@ const char help_fmt[] =
     "\n"
     "See the top-level comment in .bpf.c for more details.\n"
     "\n"
-    "Usage: %s [-v] [-h] [-e EPOCH_NS]\n"
+    "Usage: %s [-v] [-d] [-h] [-e EPOCH_NS]\n"
     "\n"
     "  -v            Print libbpf debug messages\n"
+    "  -d            Disable synchronized scheduling for vCPU threads\n"
     "  -e EPOCH_NS   Set SIMT epoch in nanoseconds (default: 100000 = 0.1ms)\n"
     "  -h            Display this help and exit\n";
 
 static bool verbose = false;
+static bool sync_enabled = true;
 static volatile int exit_req = 0;
 static struct scx_ossim *global_skel = nullptr;
 static __u64 simt_epoch_ns = 100000; /* default: 0.1 ms */
@@ -468,6 +470,18 @@ public:
     return grpc::Status::OK;
   }
 
+  grpc::Status
+  SetSyncEnabled(grpc::ServerContext *context,
+                 const ossim::SetSyncEnabledRequest *request,
+                 ossim::SetSyncEnabledResponse *response) override {
+    skel_->bss->sync_enabled = request->enabled();
+    response->set_success(true);
+    response->set_message(request->enabled()
+                              ? "Synchronized scheduling enabled"
+                              : "Synchronized scheduling disabled");
+    return grpc::Status::OK;
+  }
+
   grpc::Status Shutdown(grpc::ServerContext *context,
                         const ossim::ShutdownRequest *request,
                         ossim::ShutdownResponse *response) override {
@@ -557,10 +571,13 @@ int main(int argc, char **argv) {
 restart:
   skel = SCX_OPS_OPEN(ossim_ops, scx_ossim);
 
-  while ((opt = getopt(argc, argv, "ve:h")) != -1) {
+  while ((opt = getopt(argc, argv, "vde:h")) != -1) {
     switch (opt) {
     case 'v':
       verbose = true;
+      break;
+    case 'd':
+      sync_enabled = false;
       break;
     case 'e':
       simt_epoch_ns = strtoull(optarg, NULL, 10);
@@ -578,6 +595,7 @@ restart:
     }
   }
 
+  skel->bss->sync_enabled = sync_enabled;
   skel->bss->simt_epoch = simt_epoch_ns;
 
   SCX_OPS_LOAD(skel, ossim_ops, scx_ossim, uei);
@@ -594,7 +612,8 @@ restart:
     __u64 stats[SCX_OSSIM_NUM_STAT];
 
     read_stats(skel, stats);
-    printf("[global_simt=%lu]\n", skel->bss->global_simt);
+    printf("[global_simt=%lu sync_enabled:%d]\n", skel->bss->global_simt,
+           skel->bss->sync_enabled);
     printf("local=%llu global=%llu vcpu=%llu system=%llu vcpu_noenquable=%llu "
            "vcpu_enquable_too_early=%llu\n",
            stats[SCX_OSSIM_STAT_LOCAL_ENQUEUE],

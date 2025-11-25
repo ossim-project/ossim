@@ -497,6 +497,39 @@ int ossim_ctl_set_global_coordination_list(
 }
 
 /**
+ * ossim_ctl_set_sync_enabled - Enable or disable synchronized scheduling
+ */
+int ossim_ctl_set_sync_enabled(struct ossim_ctl *ctl, bool enabled) {
+  if (!ctl) {
+    return OSSIM_ERR_INVALID;
+  }
+
+  try {
+    grpc::ClientContext context;
+    ossim::SetSyncEnabledRequest request;
+    ossim::SetSyncEnabledResponse response;
+
+    request.set_enabled(enabled);
+
+    grpc::Status status =
+        ctl->stub->SetSyncEnabled(&context, request, &response);
+    if (!status.ok()) {
+      return OSSIM_ERR_WRITE;
+    }
+
+    if (!response.success()) {
+      fprintf(stderr, "Set sync enabled failed: %s\n",
+              response.message().c_str());
+      return OSSIM_ERR_UNKNOWN;
+    }
+
+    return OSSIM_OK;
+  } catch (...) {
+    return OSSIM_ERR_UNKNOWN;
+  }
+}
+
+/**
  * ossim_strerror - Get error message for error code
  */
 const char *ossim_strerror(int error) {

@@ -9,6 +9,9 @@ char _license[] SEC("license") = "GPL";
 
 #define MAX_SCHED_GRP_SIZE 32
 
+/* Maxinum number of events for each per processing */
+#define MAX_PROCESS_EVENT_NUM 8
+
 UEI_DEFINE(uei);
 
 /*
@@ -78,6 +81,9 @@ struct {
 /* vtime for system thread scheduling (see scx_simple) */
 static u64 system_vtime_now;
 
+/* Whether synchronization is enabled */
+volatile bool sync_enabled;
+
 /* Simulated time epoch */
 volatile u64 simt_epoch;
 
@@ -121,9 +127,15 @@ static bool sched_grp_remove(struct sched_grp *grp, pid_t tid) {
 
   bpf_spin_lock(&grp->lock);
 
-  for (u32 i = 0; i < grp->cnt && i < MAX_SCHED_GRP_SIZE; i++) {
+  int i;
+  bpf_for(i, 0, MAX_SCHED_GRP_SIZE) {
+    if (i >= grp->cnt)
+      break;
     if (grp->nodes[i].tid == tid) {
-      for (u32 j = i; j < grp->cnt - 1 && j < MAX_SCHED_GRP_SIZE - 1; j++) {
+      int j;
+      bpf_for(j, i, MAX_SCHED_GRP_SIZE - 1) {
+        if (j >= grp->cnt - 1)
+          break;
         grp->nodes[j] = grp->nodes[j + 1];
       }
       grp->cnt--;
@@ -142,17 +154,18 @@ static u64 sched_grp_find_min_simt_enquable_nolock(struct sched_grp *grp,
   struct sched_node *min_node = NULL;
   u64 simt;
   int status;
+  int i;
 
-  for (u32 i = 0; i < grp->cnt && i < MAX_SCHED_GRP_SIZE; i++) {
+  bpf_for(i, 0, MAX_SCHED_GRP_SIZE) {
+    if (i >= grp->cnt)
+      break;
     status = grp->nodes[i].status;
-    if (status == SCHED_NODE_STATUS_NONENQUABLE)
+    if (status != SCHED_NODE_STATUS_ENQUABLE)
       continue;
     simt = grp->nodes[i].simt;
     if (simt < min_simt) {
       min_simt = simt;
-      if (status == SCHED_NODE_STATUS_ENQUABLE) {
-        min_node = &grp->nodes[i];
-      }
+      min_node = &grp->nodes[i];
     }
   }
   *node = min_node;
@@ -161,7 +174,10 @@ static u64 sched_grp_find_min_simt_enquable_nolock(struct sched_grp *grp,
 
 static struct sched_node *sched_grp_find_nolock(struct sched_grp *grp,
                                                 pid_t tid) {
-  for (u32 i = 0; i < grp->cnt && i < MAX_SCHED_GRP_SIZE; i++) {
+  int i;
+  bpf_for(i, 0, MAX_SCHED_GRP_SIZE) {
+    if (i >= grp->cnt)
+      break;
     if (grp->nodes[i].tid == tid)
       return &grp->nodes[i];
   }
@@ -286,9 +302,10 @@ static void unregister_vcpu(pid_t tid) {
 static void process_events(void) {
   struct scx_ossim_event event;
   int ret;
+  int i;
 
   /* Process up to 8 events per call to avoid hogging CPU */
-  for (u32 i = 0; i < 8; i++) {
+  bpf_for(i, 0, MAX_PROCESS_EVENT_NUM) {
     ret = bpf_map_pop_elem(&event_queue, &event);
     if (ret != 0) {
       /* Queue is empty */
@@ -394,9 +411,13 @@ void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
   metadata = bpf_map_lookup_elem(&vcpu_registry, &tid);
 
   if (metadata != NULL) {
+    /* This is essential when:
+     *   1. a blocked vCPU becomes runnable
+     *   2. sync_enabled => true
+     */
+    metadata->simt =
+        global_simt > metadata->simt ? global_simt : metadata->simt;
     if (metadata->blocked) {
-      metadata->simt =
-          global_simt > metadata->simt ? global_simt : metadata->simt;
       metadata->blocked = false;
     }
     struct sched_grp *grp = get_global_sched_grp();
@@ -425,7 +446,7 @@ void BPF_STRUCT_OPS(ossim_enqueue, struct task_struct *p, u64 enq_flags) {
   }
 }
 
-void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
+s32 BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
   /* Dispatch vCPUs from the global scheduling group */
   {
     pid_t tid = 0;
@@ -434,17 +455,28 @@ void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
     struct sched_grp *grp = get_global_sched_grp();
 
     if (grp) {
+      /* Snapshot sync_enabled in case of race conditions */
+      bool sync = sync_enabled;
 
-      u64 limit = global_sync_scope_get_min_simt_update() + simt_epoch;
+      u64 limit;
+      if (sync) {
+        limit = global_simt + simt_epoch;
+      }
 
       bpf_spin_lock(&grp->lock);
 
       u64 simt = sched_grp_find_min_simt_enquable_nolock(grp, &sched_node);
       if (sched_node != NULL) {
-        if (simt <= limit) {
+        if (sync) {
+          if (simt <= limit) {
+            tid = sched_node->tid;
+            sched_node->status = SCHED_NODE_STATUS_ENQUEUED;
+            slice = limit - simt;
+          }
+        } else {
           tid = sched_node->tid;
           sched_node->status = SCHED_NODE_STATUS_ENQUEUED;
-          slice = limit - simt;
+          slice = SCX_SLICE_DFL;
         }
       }
 
@@ -479,6 +511,7 @@ void BPF_STRUCT_OPS(ossim_dispatch, s32 cpu, struct task_struct *prev) {
 
   /* Then dispatch from system DSQ */
   scx_bpf_dsq_move_to_local(SYSTEM_DSQ);
+  return 0;
 }
 
 void BPF_STRUCT_OPS(ossim_running, struct task_struct *p) {
@@ -488,7 +521,12 @@ void BPF_STRUCT_OPS(ossim_running, struct task_struct *p) {
       bpf_map_lookup_elem(&vcpu_registry, &tid);
 
   if (metadata) {
-    p->scx.dsq_vtime = bpf_ktime_get_ns(); /* Use this to track wall time */
+    if (sync_enabled) {
+      p->scx.dsq_vtime = bpf_ktime_get_ns(); /* Use this to track wall time */
+    } else {
+      p->scx.dsq_vtime =
+          0; /* As a flag to indicate that sync is disabled when running  */
+    }
   } else {
     /*
      * Global vtime always progresses forward as tasks start executing. The
@@ -509,8 +547,11 @@ void BPF_STRUCT_OPS(ossim_stopping, struct task_struct *p, bool runnable) {
 
   if (metadata) {
     /* Update simulated time */
-    u64 simt_delta = bpf_ktime_get_ns() - p->scx.dsq_vtime;
-    metadata->simt += simt_delta;
+    if (p->scx.dsq_vtime != 0) {
+      u64 simt_delta = bpf_ktime_get_ns() - p->scx.dsq_vtime;
+      metadata->simt += simt_delta;
+      global_sync_scope_get_min_simt_update();
+    }
     metadata->blocked = !runnable;
 
     struct sched_grp *grp = get_global_sched_grp();

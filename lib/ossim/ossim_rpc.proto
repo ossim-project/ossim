@@ -137,6 +137,16 @@ message SetGlobalCoordinationListResponse {
   string message = 2;
 }
 
+// Set sync enabled/disabled
+message SetSyncEnabledRequest {
+  bool enabled = 1;
+}
+
+message SetSyncEnabledResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // Empty request for getting stats
 message GetStatsRequest {}
 
@@ -174,6 +184,9 @@ service OssimScheduler {
 
   // Set entire global coordination list
   rpc SetGlobalCoordinationList(SetGlobalCoordinationListRequest) returns (SetGlobalCoordinationListResponse);
+
+  // Enable or disable synchronized scheduling
+  rpc SetSyncEnabled(SetSyncEnabledRequest) returns (SetSyncEnabledResponse);
 
   // Shutdown the scheduler
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
