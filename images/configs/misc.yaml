@@ -1,7 +1,0 @@
-local:
-  network:
-    management:
-      interface: eth0
-    provider:
-      interface: eth1
-      bridge: br-provider
