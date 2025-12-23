@@ -144,9 +144,8 @@ $(SCX_SRC_DIR)/:
 	rm -rf $(dir $@)
 	git clone https://github.com/sched-ext/scx.git --branch v$(SCX_VERSION) $(dir $@)
 
-# sudo-rs (default in Ubuntu 25.04) does not support `sudo -E`. We use sudo -i to source `/etc/profile` for environment variables.
 run: $(OBJ_DIR)/$(TARGET)
-	sudo -i $<
+	$<
 
 clean:
 	rm -rf $(filter-out $(SCX_SRC_DIR),$(wildcard $(OBJ_DIR)/*))
