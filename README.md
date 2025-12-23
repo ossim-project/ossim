@@ -10,29 +10,29 @@ Prerequisites:
 - KVM is available
 - `sudo` is enabled for the current user
 
-You may also want to configure the following environment variables:
-
-- `OSSIM_PREFIX`: The install directory, default: `/usr/local/ossim/`
-- `OSSIM_BUILD`: The build directory, default: `./build/`
-- `OSSIM_OUTPUT`: The output directory, default: `./out/`
 
 Steps:
 
-1. Update environment variables to include the `OSSIM_PREFIX`:
+1. Configure the following environment variables:
+
+    - `OSSIM_PREFIX`: The install directory (e.g., `/usr/local/ossim/`)
+    - `OSSIM_BUILD_DIR`: The build directory, (e.g., `./build/`)
+    - `OSSIM_OUT_DIR`: The output directory, (e.g, `./out/`)
+
+    Also update environment variables to include the `OSSIM_PREFIX`:
     ```sh
     export PATH=${OSSIM_PREFIX}/bin${PATH:+:$PATH}
     export LD_LIBRARY_PATH=${OSSIM_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     export LIBRARY_PATH=${OSSIM_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
     export CPATH=${OSSIM_PREFIX}/include${CPATH:+:$CPATH}
     export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
-
     ```
-    You may want to persist these changes in `/etc/profile.d/ossim.sh`, so that it can be also seem by `sudo -i`. (`sudo -E` is not supported by `sudo-rs` (default in Ubuntu 25.10.), as for November 2025.)
 
 2. Install dependencies:
 
     ```sh
-    bash scripts/install_deps.sh
+    bash scripts/install_apt_deps.sh
+    bash scripts/intall_grpc.sh
     ```
 
     This may take more than 10 minutes because it builds some dependencies (e.g., gRPC) from source.

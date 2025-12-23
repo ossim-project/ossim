@@ -11,6 +11,7 @@ PREFIX := $(if $(filter %/,$(PREFIX)),$(PREFIX),$(PREFIX)/)
 
 prefix := $(PREFIX)
 project_root := ./
+PROJECT_ROOT := $(project_root)
 
 d := $(project_root)
 o := $(OUTPUT)

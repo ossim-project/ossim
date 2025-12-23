@@ -69,7 +69,7 @@ build-linux: $(linux_b).config
 
 .PHONY: install-linux
 install-linux: $(linux_b)vmlinux
-	sudo $(MAKE) -C $(linux_b) modules_install install
+	$(SUDO) $(MAKE) -C $(linux_b) modules_install install
 
 .PHONY: clean-linux
 clean-linux:
