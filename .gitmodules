@@ -1,6 +1,6 @@
 [submodule "qemu"]
 	path = qemu
 	url = https://github.com/ossim-project/qemu.git
-[submodule "libvirt"]
-	path = libvirt
-	url = https://github.com/ossim-project/libvirt.git
+[submodule "kernel"]
+	path = kernel
+	url = https://github.com/ossim-project/linux.git
