@@ -21,6 +21,7 @@ sudo apt-get update && sudo apt-get install -y \
     rustup \
     unzip \
     clang-format \
-    autoconf libtool
+    autoconf libtool \
+    virtme-ng
 
 rustup default stable

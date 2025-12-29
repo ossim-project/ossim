@@ -34,7 +34,6 @@ clean:
 
 include make/lib.mk
 include make/qemu.mk
-include make/libvirt.mk
-include make/linux.mk
+include make/kernel.mk
 include make/ossimd.mk
 include make/ossimctl.mk

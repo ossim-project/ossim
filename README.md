@@ -49,6 +49,30 @@ Steps:
     You may want to re-login for the configuration to take effect.
 
 
+## Ossim Kernel
+
+`kernel/` contains the Ossim custom Linux kernel. Build and test it using virtme-ng for rapid iteration:
+
+```sh
+# Configure kernel using host config
+make configure-kernel
+# Alternatively, use virtme-ng defaults for minimal config
+make configure-kernel-vng
+
+# Build kernel
+make build-kernel -j`nproc`
+
+# Test kernel with virtme-ng (boots with host filesystem)
+make vng-kernel
+```
+
+To install the kernel to the host system:
+
+```sh
+make install-kernel 
+```
+
+
 ## QEMU with Ossim Integration
 
 `qemu/` contains a fork of QEMU with Ossim integration. We need to build it from source and install to `$OSSIM_PREFIX`:
