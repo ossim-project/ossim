@@ -1,6 +1,6 @@
 # Makefile for libossim - gRPC-based control library
 #
-# This library provides C API for communicating with scx_ossim scheduler daemon
+# This library provides C API for communicating with ossimd
 
 ifeq ("$(origin O)", "command line")
   KBUILD_OUTPUT := $(abspath $(O))

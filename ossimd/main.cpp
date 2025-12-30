@@ -7,188 +7,306 @@
 
 extern "C" {
 #include <assert.h>
-#include <bpf/bpf.h>
-#include <bpf/libbpf.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <pthread.h>
-#include <scx/common.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "ossim/config.h"
-#include "scx_ossim/interface.h"
-#include "scx_ossim/scx_ossim.bpf.skel.h"
+#include <linux/ossim.h>
 }
 
 const char help_fmt[] =
-    "A sched_ext scheduler with gRPC interface.\n"
+    "Ossim daemon.\n"
     "\n"
-    "See the top-level comment in .bpf.c for more details.\n"
+    "Usage: %s [-v] [-d] [-h]\n"
     "\n"
-    "Usage: %s [-v] [-d] [-h] [-e EPOCH_NS]\n"
-    "\n"
-    "  -v            Print libbpf debug messages\n"
+    "  -v            Print verbose debug messages\n"
     "  -d            Disable synchronized scheduling for vCPU threads\n"
-    "  -e EPOCH_NS   Set SIMT epoch in nanoseconds (default: 100000 = 0.1ms)\n"
     "  -h            Display this help and exit\n";
 
 static bool verbose = false;
 static bool sync_enabled = true;
 static volatile int exit_req = 0;
-static struct scx_ossim *global_skel = nullptr;
-static __u64 simt_epoch_ns = 100000; /* default: 0.1 ms */
-
-static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
-                           va_list args) {
-  if (level == LIBBPF_DEBUG && !verbose)
-    return 0;
-  return vfprintf(stderr, format, args);
-}
 
 static void sigint_handler(int simple) { exit_req = 1; }
 
-static void read_stats(struct scx_ossim *skel, __u64 *stats) {
-  int nr_cpus = libbpf_num_possible_cpus();
-  assert(nr_cpus > 0);
-  __u64 *cnts[SCX_OSSIM_NUM_STAT];
-  for (int i = 0; i < SCX_OSSIM_NUM_STAT; i++) {
-    cnts[i] = (__u64 *)calloc(nr_cpus, sizeof(__u64));
-  }
-  __u32 idx;
+/*
+ * OssimKernelInterface - Wrapper class for /dev/ossim ioctl operations
+ */
+class OssimKernelInterface {
+private:
+  int fd_;
+  bool valid_;
 
-  memset(stats, 0, sizeof(stats[0]) * SCX_OSSIM_NUM_STAT);
+public:
+  OssimKernelInterface() : fd_(-1), valid_(false) {}
 
-  for (idx = 0; idx < SCX_OSSIM_NUM_STAT; idx++) {
-    int ret, cpu;
-
-    ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.stats), &idx, cnts[idx]);
-    if (ret < 0)
-      continue;
-    for (cpu = 0; cpu < nr_cpus; cpu++)
-      stats[idx] += cnts[idx][cpu];
-  }
-
-  for (idx = 0; idx < SCX_OSSIM_NUM_STAT; idx++) {
-    free(cnts[idx]);
-  }
-}
-
-/* Print registered vCPUs */
-static void print_registered_vcpus(struct scx_ossim *skel) {
-  pid_t key, next_key;
-  struct scx_ossim_vcpu_metadata metadata;
-  int count = 0;
-  int map_fd = bpf_map__fd(skel->maps.vcpu_registry);
-
-  printf("Registered vCPUs:\n");
-
-  /* Iterate through all keys in the hash map */
-  key = 0;
-  while (bpf_map_get_next_key(map_fd, &key, &next_key) == 0) {
-    if (bpf_map_lookup_elem(map_fd, &next_key, &metadata) == 0) {
-      printf("  [%d] tid=%d vm_id=%u vcpu_id=%u simt=%lu\n", count,
-             metadata.tid, metadata.vm_id, metadata.vcpu_id, metadata.simt);
-      count++;
+  ~OssimKernelInterface() {
+    if (fd_ >= 0) {
+      close(fd_);
     }
-    key = next_key;
   }
 
-  if (count == 0) {
-    printf("  (none)\n");
-  }
-}
-
-/* Register a vCPU by pushing an event to the queue */
-static int register_vcpu(struct scx_ossim *skel, pid_t tid, __u32 vm_id,
-                         __u32 vcpu_id) {
-  struct scx_ossim_event event = {
-      .event_type = SCX_OSSIM_EVENT_VCPU_REGISTER,
-      .vcpu_reg =
-          {
-              .tid = tid,
-              .vm_id = vm_id,
-              .vcpu_id = vcpu_id,
-          },
-  };
-
-  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.event_queue), NULL,
-                                &event, BPF_ANY);
-  if (ret < 0) {
-    fprintf(stderr, "Failed to push vCPU registration event: %s\n",
-            strerror(errno));
-    return ret;
+  bool open() {
+    fd_ = ::open(OSSIM_DEVICE_PATH, O_RDWR);
+    if (fd_ < 0) {
+      fprintf(stderr, "Failed to open %s: %s\n", OSSIM_DEVICE_PATH,
+              strerror(errno));
+      return false;
+    }
+    valid_ = true;
+    return true;
   }
 
-  if (verbose) {
-    printf("Registered vCPU: tid=%d vm_id=%u vcpu_id=%u\n", tid, vm_id,
-           vcpu_id);
+  bool is_valid() const { return valid_; }
+  int fd() const { return fd_; }
+
+  /* vCPU registration */
+  int register_vcpu(pid_t tid, uint32_t vm_id, uint32_t vcpu_id) {
+    struct ossim_vcpu_params params = {
+        .tid = tid,
+        .vm_id = vm_id,
+        .vcpu_id = vcpu_id,
+    };
+
+    int ret = ioctl(fd_, OSSIM_REGISTER_VCPU, &params);
+    if (ret < 0) {
+      fprintf(stderr, "Failed to register vCPU (tid=%d): %s\n", tid,
+              strerror(errno));
+      return -errno;
+    }
+
+    if (verbose) {
+      printf("Registered vCPU: tid=%d vm_id=%u vcpu_id=%u\n", tid, vm_id,
+             vcpu_id);
+    }
+
+    return 0;
   }
 
-  return 0;
-}
+  /* vCPU unregistration */
+  int unregister_vcpu(pid_t tid) {
+    __s32 tid_param = tid;
 
-/* Unregister a vCPU by pushing an event to the queue */
-static int unregister_vcpu(struct scx_ossim *skel, pid_t tid) {
-  struct scx_ossim_event event = {
-      .event_type = SCX_OSSIM_EVENT_VCPU_UNREGISTER,
-      .vcpu_unreg =
-          {
-              .tid = tid,
-          },
-  };
+    int ret = ioctl(fd_, OSSIM_UNREGISTER_VCPU, &tid_param);
+    if (ret < 0) {
+      fprintf(stderr, "Failed to unregister vCPU (tid=%d): %s\n", tid,
+              strerror(errno));
+      return -errno;
+    }
 
-  int ret = bpf_map_update_elem(bpf_map__fd(skel->maps.event_queue), NULL,
-                                &event, BPF_ANY);
-  if (ret < 0) {
-    fprintf(stderr, "Failed to push vCPU unregistration event: %s\n",
-            strerror(errno));
-    return ret;
+    if (verbose) {
+      printf("Unregistered vCPU: tid=%d\n", tid);
+    }
+
+    return 0;
   }
 
-  if (verbose) {
-    printf("Unregistered vCPU: tid=%d\n", tid);
+  /* Query vCPU information */
+  int query_vcpu(pid_t tid, struct ossim_vcpu_info *info) {
+    memset(info, 0, sizeof(*info));
+    info->tid = tid;
+
+    int ret = ioctl(fd_, OSSIM_QUERY_VCPU, info);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
   }
 
-  return 0;
-}
+  /* Add thread IDs to a synchronization scope */
+  int add_sscope(const struct ossim_sscope &sscope, const int32_t *tids,
+                 uint32_t count) {
+    struct ossim_sscope_params params;
+    memset(&params, 0, sizeof(params));
 
-/* Query vCPU registration status */
-static int query_vcpu(struct scx_ossim *skel, pid_t tid,
-                      struct scx_ossim_vcpu_metadata *metadata) {
-  int ret = bpf_map_lookup_elem(bpf_map__fd(skel->maps.vcpu_registry), &tid,
-                                metadata);
-  return ret;
-}
+    if (count > OSSIM_MAX_SSCOPE_SIZE) {
+      return -EINVAL;
+    }
+
+    params.sscope = sscope;
+    params.count = count;
+    for (uint32_t i = 0; i < count; i++) {
+      params.tids[i] = tids[i];
+    }
+
+    int ret = ioctl(fd_, OSSIM_ADD_SSCOPE, &params);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Remove thread IDs from a synchronization scope */
+  int remove_sscope(const struct ossim_sscope &sscope, const int32_t *tids,
+                    uint32_t count) {
+    struct ossim_sscope_params params;
+    memset(&params, 0, sizeof(params));
+
+    if (count > OSSIM_MAX_SSCOPE_SIZE) {
+      return -EINVAL;
+    }
+
+    params.sscope = sscope;
+    params.count = count;
+    for (uint32_t i = 0; i < count; i++) {
+      params.tids[i] = tids[i];
+    }
+
+    int ret = ioctl(fd_, OSSIM_REMOVE_SSCOPE, &params);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Reset (clear all thread IDs from) a synchronization scope */
+  int reset_sscope(const struct ossim_sscope &sscope) {
+    int ret = ioctl(fd_, OSSIM_RESET_SSCOPE, &sscope);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Get thread IDs in a synchronization scope */
+  int get_sscope(const struct ossim_sscope &sscope,
+                 struct ossim_sscope_params *params) {
+    memset(params, 0, sizeof(*params));
+    params->sscope = sscope;
+
+    int ret = ioctl(fd_, OSSIM_GET_SSCOPE, params);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Convenience: Add to per-vCPU local scope */
+  int add_vcpu_local_sscope(pid_t vcpu_tid, const int32_t *tids, uint32_t count) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_VCPU_LOCAL, vcpu_tid};
+    return add_sscope(sscope, tids, count);
+  }
+
+  /* Convenience: Remove from per-vCPU local scope */
+  int remove_vcpu_local_sscope(pid_t vcpu_tid, const int32_t *tids,
+                               uint32_t count) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_VCPU_LOCAL, vcpu_tid};
+    return remove_sscope(sscope, tids, count);
+  }
+
+  /* Convenience: Reset per-vCPU local scope */
+  int reset_vcpu_local_sscope(pid_t vcpu_tid) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_VCPU_LOCAL, vcpu_tid};
+    return reset_sscope(sscope);
+  }
+
+  /* Convenience: Add to custom scope */
+  int add_custom_sscope(int32_t scope_id, const int32_t *tids, uint32_t count) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_CUSTOM, scope_id};
+    return add_sscope(sscope, tids, count);
+  }
+
+  /* Convenience: Remove from custom scope */
+  int remove_custom_sscope(int32_t scope_id, const int32_t *tids, uint32_t count) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_CUSTOM, scope_id};
+    return remove_sscope(sscope, tids, count);
+  }
+
+  /* Convenience: Reset custom scope */
+  int reset_custom_sscope(int32_t scope_id) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_CUSTOM, scope_id};
+    return reset_sscope(sscope);
+  }
+
+  /* Convenience: Get custom scope */
+  int get_custom_sscope(int32_t scope_id, struct ossim_sscope_params *params) {
+    struct ossim_sscope sscope = {OSSIM_SSCOPE_TYPE_CUSTOM, scope_id};
+    return get_sscope(sscope, params);
+  }
+
+  /* Get scheduler statistics */
+  int get_stats(struct ossim_stats *stats) {
+    memset(stats, 0, sizeof(*stats));
+
+    int ret = ioctl(fd_, OSSIM_GET_STATS, stats);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Enable/disable synchronized scheduling */
+  int set_sync_enabled(bool enabled) {
+    __s32 enabled_param = enabled ? 1 : 0;
+
+    int ret = ioctl(fd_, OSSIM_SET_SYNC_ENABLED, &enabled_param);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+
+  /* Request kernel module shutdown */
+  int shutdown() {
+    int ret = ioctl(fd_, OSSIM_SHUTDOWN);
+    if (ret < 0) {
+      return -errno;
+    }
+
+    return 0;
+  }
+};
+
+/* Global kernel interface pointer */
+static OssimKernelInterface *global_kernel_interface = nullptr;
 
 // gRPC Service Implementation
 class OssimSchedulerServiceImpl final : public ossim::OssimScheduler::Service {
 private:
-  struct scx_ossim *skel_;
+  OssimKernelInterface *kernel_;
 
 public:
-  explicit OssimSchedulerServiceImpl(struct scx_ossim *skel) : skel_(skel) {}
+  explicit OssimSchedulerServiceImpl(OssimKernelInterface *kernel)
+      : kernel_(kernel) {}
 
   grpc::Status GetStats(grpc::ServerContext *context,
                         const ossim::GetStatsRequest *request,
                         ossim::Stats *response) override {
-    __u64 stats[4];
-    read_stats(skel_, stats);
-    response->set_local_enqueues(stats[0]);
-    response->set_global_enqueues(stats[1]);
-    response->set_vcpu_enqueues(stats[2]);
-    response->set_system_enqueues(stats[3]);
+    struct ossim_stats stats;
+    int ret = kernel_->get_stats(&stats);
+    if (ret < 0) {
+      return grpc::Status(grpc::StatusCode::INTERNAL,
+                          "Failed to get stats: " + std::string(strerror(-ret)));
+    }
+
+    /* Map kernel stats to gRPC response */
+    response->set_local_enqueues(0); /* Not tracked separately in new interface */
+    response->set_global_enqueues(0); /* Not tracked separately in new interface */
+    response->set_vcpu_enqueues(stats.vcpu_enqueues);
+    response->set_system_enqueues(stats.system_enqueues);
     return grpc::Status::OK;
   }
 
   grpc::Status RegisterVcpu(grpc::ServerContext *context,
                             const ossim::RegisterVcpuRequest *request,
                             ossim::RegisterVcpuResponse *response) override {
-    int ret = register_vcpu(skel_, request->tid(), request->vm_id(),
-                            request->vcpu_id());
+    int ret = kernel_->register_vcpu(request->tid(), request->vm_id(),
+                                     request->vcpu_id());
     if (ret == 0) {
       response->set_success(true);
       response->set_message("vCPU registered successfully");
@@ -204,7 +322,7 @@ public:
   UnregisterVcpu(grpc::ServerContext *context,
                  const ossim::UnregisterVcpuRequest *request,
                  ossim::UnregisterVcpuResponse *response) override {
-    int ret = unregister_vcpu(skel_, request->tid());
+    int ret = kernel_->unregister_vcpu(request->tid());
     if (ret == 0) {
       response->set_success(true);
       response->set_message("vCPU unregistered successfully");
@@ -219,19 +337,19 @@ public:
   grpc::Status QueryVcpu(grpc::ServerContext *context,
                          const ossim::QueryVcpuRequest *request,
                          ossim::QueryVcpuResponse *response) override {
-    struct scx_ossim_vcpu_metadata metadata;
-    int ret = query_vcpu(skel_, request->tid(), &metadata);
+    struct ossim_vcpu_info info;
+    int ret = kernel_->query_vcpu(request->tid(), &info);
     if (ret == 0) {
       response->set_success(true);
       response->set_message("vCPU found");
       auto *vcpu_meta = response->mutable_metadata();
-      vcpu_meta->set_tid(metadata.tid);
-      vcpu_meta->set_vm_id(metadata.vm_id);
-      vcpu_meta->set_vcpu_id(metadata.vcpu_id);
-      vcpu_meta->set_simt(metadata.simt);
-      vcpu_meta->set_coord_count(metadata.sync_scope.count);
-      for (__u32 i = 0; i < metadata.sync_scope.count; i++) {
-        vcpu_meta->add_coord_vcpus(metadata.sync_scope.tids[i]);
+      vcpu_meta->set_tid(info.tid);
+      vcpu_meta->set_vm_id(info.vm_id);
+      vcpu_meta->set_vcpu_id(info.vcpu_id);
+      vcpu_meta->set_simt(info.simt);
+      vcpu_meta->set_coord_count(info.coord_count);
+      for (uint32_t i = 0; i < info.coord_count; i++) {
+        vcpu_meta->add_coord_vcpus(info.coord_tids[i]);
       }
     } else {
       response->set_success(false);
@@ -244,26 +362,16 @@ public:
   AddCoordination(grpc::ServerContext *context,
                   const ossim::AddCoordinationRequest *request,
                   ossim::AddCoordinationResponse *response) override {
-    struct scx_ossim_event event = {
-        .event_type = SCX_OSSIM_EVENT_COORD_ADD,
-        .coord_op =
-            {
-                .vcpu_tid = request->vcpu_tid(),
-                .related_tid = request->related_tid(),
-            },
-    };
-
-    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
-                                  &event, BPF_ANY);
-    if (ret < 0) {
+    int32_t tid = request->related_tid();
+    int ret = kernel_->add_vcpu_local_sscope(request->vcpu_tid(), &tid, 1);
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message("Coordination added successfully");
+    } else {
       response->set_success(false);
-      response->set_message("Failed to push coordination event: " +
-                            std::string(strerror(errno)));
-      return grpc::Status::OK;
+      response->set_message("Failed to add coordination: " +
+                            std::string(strerror(-ret)));
     }
-
-    response->set_success(true);
-    response->set_message("Coordination add event queued");
     return grpc::Status::OK;
   }
 
@@ -271,26 +379,16 @@ public:
   RemoveCoordination(grpc::ServerContext *context,
                      const ossim::RemoveCoordinationRequest *request,
                      ossim::RemoveCoordinationResponse *response) override {
-    struct scx_ossim_event event = {
-        .event_type = SCX_OSSIM_EVENT_COORD_REMOVE,
-        .coord_op =
-            {
-                .vcpu_tid = request->vcpu_tid(),
-                .related_tid = request->related_tid(),
-            },
-    };
-
-    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
-                                  &event, BPF_ANY);
-    if (ret < 0) {
+    int32_t tid = request->related_tid();
+    int ret = kernel_->remove_vcpu_local_sscope(request->vcpu_tid(), &tid, 1);
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message("Coordination removed successfully");
+    } else {
       response->set_success(false);
-      response->set_message("Failed to push coordination event: " +
-                            std::string(strerror(errno)));
-      return grpc::Status::OK;
+      response->set_message("Failed to remove coordination: " +
+                            std::string(strerror(-ret)));
     }
-
-    response->set_success(true);
-    response->set_message("Coordination remove event queued");
     return grpc::Status::OK;
   }
 
@@ -299,53 +397,38 @@ public:
                       const ossim::SetCoordinationListRequest *request,
                       ossim::SetCoordinationListResponse *response) override {
     pid_t vcpu_tid = request->vcpu_tid();
-    int queue_fd = bpf_map__fd(skel_->maps.event_queue);
 
-    // Check if the new coordination list is too large
-    if (request->related_tids_size() > SCX_OSSIM_MAX_SYNC_SCOPE_SIZE) {
+    /* Check if the new coordination list is too large */
+    if (request->related_tids_size() > OSSIM_MAX_SSCOPE_SIZE) {
       response->set_success(false);
       response->set_message("Coordination list exceeds maximum size");
       return grpc::Status::OK;
     }
 
-    // First, push a CLEAR event
-    struct scx_ossim_event clear_event = {
-        .event_type = SCX_OSSIM_EVENT_COORD_CLEAR,
-        .coord_op =
-            {
-                .vcpu_tid = vcpu_tid,
-                .related_tid = 0,
-            },
-    };
-    int ret = bpf_map_update_elem(queue_fd, NULL, &clear_event, BPF_ANY);
+    /* Reset existing list first */
+    int ret = kernel_->reset_vcpu_local_sscope(vcpu_tid);
     if (ret < 0) {
       response->set_success(false);
-      response->set_message("Failed to push clear event: " +
-                            std::string(strerror(errno)));
+      response->set_message("Failed to reset coordination list: " +
+                            std::string(strerror(-ret)));
       return grpc::Status::OK;
     }
 
-    // Then, push ADD events for each TID in the new list
-    for (int i = 0; i < request->related_tids_size(); i++) {
-      struct scx_ossim_event add_event = {
-          .event_type = SCX_OSSIM_EVENT_COORD_ADD,
-          .coord_op =
-              {
-                  .vcpu_tid = vcpu_tid,
-                  .related_tid = request->related_tids(i),
-              },
-      };
-      ret = bpf_map_update_elem(queue_fd, NULL, &add_event, BPF_ANY);
+    /* Add new entries if any */
+    if (request->related_tids_size() > 0) {
+      std::vector<int32_t> tids(request->related_tids().begin(),
+                                request->related_tids().end());
+      ret = kernel_->add_vcpu_local_sscope(vcpu_tid, tids.data(), tids.size());
       if (ret < 0) {
         response->set_success(false);
-        response->set_message("Failed to push add event: " +
-                              std::string(strerror(errno)));
+        response->set_message("Failed to add coordination list: " +
+                              std::string(strerror(-ret)));
         return grpc::Status::OK;
       }
     }
 
     response->set_success(true);
-    response->set_message("Coordination list update events queued");
+    response->set_message("Coordination list updated successfully");
     return grpc::Status::OK;
   }
 
@@ -353,16 +436,19 @@ public:
       grpc::ServerContext *context,
       const ossim::GetGlobalCoordinationListRequest *request,
       ossim::GetGlobalCoordinationListResponse *response) override {
-    // Access global_sync_scope directly from BSS
-    struct scx_ossim_sync_scope *sync_scope = &skel_->bss->global_sync_scope;
-
-    response->set_success(true);
-    response->set_message("Global coordination list retrieved");
-    for (__u32 i = 0;
-         i < sync_scope->count && i < SCX_OSSIM_MAX_SYNC_SCOPE_SIZE; i++) {
-      response->add_tids(sync_scope->tids[i]);
+    struct ossim_sscope_params params;
+    int ret = kernel_->get_custom_sscope(OSSIM_SSCOPE_GLOBAL_ID, &params);
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message("Global coordination list retrieved");
+      for (uint32_t i = 0; i < params.count; i++) {
+        response->add_tids(params.tids[i]);
+      }
+    } else {
+      response->set_success(false);
+      response->set_message("Failed to get global coordination list: " +
+                            std::string(strerror(-ret)));
     }
-
     return grpc::Status::OK;
   }
 
@@ -370,25 +456,16 @@ public:
       grpc::ServerContext *context,
       const ossim::AddGlobalCoordinationRequest *request,
       ossim::AddGlobalCoordinationResponse *response) override {
-    struct scx_ossim_event event = {
-        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_ADD,
-        .global_coord =
-            {
-                .tid = request->tid(),
-            },
-    };
-
-    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
-                                  &event, BPF_ANY);
-    if (ret < 0) {
+    int32_t tid = request->tid();
+    int ret = kernel_->add_custom_sscope(OSSIM_SSCOPE_GLOBAL_ID, &tid, 1);
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message("Global coordination added successfully");
+    } else {
       response->set_success(false);
-      response->set_message("Failed to push global coordination event: " +
-                            std::string(strerror(errno)));
-      return grpc::Status::OK;
+      response->set_message("Failed to add global coordination: " +
+                            std::string(strerror(-ret)));
     }
-
-    response->set_success(true);
-    response->set_message("Global coordination add event queued");
     return grpc::Status::OK;
   }
 
@@ -396,25 +473,16 @@ public:
       grpc::ServerContext *context,
       const ossim::RemoveGlobalCoordinationRequest *request,
       ossim::RemoveGlobalCoordinationResponse *response) override {
-    struct scx_ossim_event event = {
-        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_REMOVE,
-        .global_coord =
-            {
-                .tid = request->tid(),
-            },
-    };
-
-    int ret = bpf_map_update_elem(bpf_map__fd(skel_->maps.event_queue), NULL,
-                                  &event, BPF_ANY);
-    if (ret < 0) {
+    int32_t tid = request->tid();
+    int ret = kernel_->remove_custom_sscope(OSSIM_SSCOPE_GLOBAL_ID, &tid, 1);
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message("Global coordination removed successfully");
+    } else {
       response->set_success(false);
-      response->set_message("Failed to push global coordination event: " +
-                            std::string(strerror(errno)));
-      return grpc::Status::OK;
+      response->set_message("Failed to remove global coordination: " +
+                            std::string(strerror(-ret)));
     }
-
-    response->set_success(true);
-    response->set_message("Global coordination remove event queued");
     return grpc::Status::OK;
   }
 
@@ -422,51 +490,36 @@ public:
       grpc::ServerContext *context,
       const ossim::SetGlobalCoordinationListRequest *request,
       ossim::SetGlobalCoordinationListResponse *response) override {
-    int queue_fd = bpf_map__fd(skel_->maps.event_queue);
-
-    // Check if the list is too large
-    if (request->tids_size() > SCX_OSSIM_MAX_SYNC_SCOPE_SIZE) {
+    /* Check if the list is too large */
+    if (request->tids_size() > OSSIM_MAX_SSCOPE_SIZE) {
       response->set_success(false);
       response->set_message("Global coordination list exceeds maximum size");
       return grpc::Status::OK;
     }
 
-    // First, push a CLEAR event
-    struct scx_ossim_event clear_event = {
-        .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_CLEAR,
-        .global_coord =
-            {
-                .tid = 0,
-            },
-    };
-    int ret = bpf_map_update_elem(queue_fd, NULL, &clear_event, BPF_ANY);
+    /* Reset existing list first */
+    int ret = kernel_->reset_custom_sscope(OSSIM_SSCOPE_GLOBAL_ID);
     if (ret < 0) {
       response->set_success(false);
-      response->set_message("Failed to push clear event: " +
-                            std::string(strerror(errno)));
+      response->set_message("Failed to reset global coordination list: " +
+                            std::string(strerror(-ret)));
       return grpc::Status::OK;
     }
 
-    // Then, push ADD events for each TID in the new list
-    for (int i = 0; i < request->tids_size(); i++) {
-      struct scx_ossim_event add_event = {
-          .event_type = SCX_OSSIM_EVENT_GLOBAL_COORD_ADD,
-          .global_coord =
-              {
-                  .tid = request->tids(i),
-              },
-      };
-      ret = bpf_map_update_elem(queue_fd, NULL, &add_event, BPF_ANY);
+    /* Add new entries if any */
+    if (request->tids_size() > 0) {
+      std::vector<int32_t> tids(request->tids().begin(), request->tids().end());
+      ret = kernel_->add_custom_sscope(OSSIM_SSCOPE_GLOBAL_ID, tids.data(), tids.size());
       if (ret < 0) {
         response->set_success(false);
-        response->set_message("Failed to push add event: " +
-                              std::string(strerror(errno)));
+        response->set_message("Failed to add global coordination list: " +
+                              std::string(strerror(-ret)));
         return grpc::Status::OK;
       }
     }
 
     response->set_success(true);
-    response->set_message("Global coordination list update events queued");
+    response->set_message("Global coordination list updated successfully");
     return grpc::Status::OK;
   }
 
@@ -474,11 +527,17 @@ public:
   SetSyncEnabled(grpc::ServerContext *context,
                  const ossim::SetSyncEnabledRequest *request,
                  ossim::SetSyncEnabledResponse *response) override {
-    skel_->bss->sync_enabled = request->enabled();
-    response->set_success(true);
-    response->set_message(request->enabled()
-                              ? "Synchronized scheduling enabled"
-                              : "Synchronized scheduling disabled");
+    int ret = kernel_->set_sync_enabled(request->enabled());
+    if (ret == 0) {
+      response->set_success(true);
+      response->set_message(request->enabled()
+                                ? "Synchronized scheduling enabled"
+                                : "Synchronized scheduling disabled");
+    } else {
+      response->set_success(false);
+      response->set_message("Failed to set sync enabled: " +
+                            std::string(strerror(-ret)));
+    }
     return grpc::Status::OK;
   }
 
@@ -492,19 +551,19 @@ public:
   }
 };
 
-// gRPC server thread
-void run_grpc_server(struct scx_ossim *skel) {
+/* gRPC server thread */
+void run_grpc_server(OssimKernelInterface *kernel) {
   std::string server_address =
       std::string("unix://") + OSSIMD_DEFAULT_SOCKET_PATH;
-  OssimSchedulerServiceImpl service(skel);
+  OssimSchedulerServiceImpl service(kernel);
 
-  // Create directory for socket if it doesn't exist (mkdir -p equivalent)
+  /* Create directory for socket if it doesn't exist (mkdir -p equivalent) */
   std::string socket_path(OSSIMD_DEFAULT_SOCKET_PATH);
   size_t last_slash = socket_path.find_last_of('/');
   if (last_slash != std::string::npos) {
     std::string dir_path = socket_path.substr(0, last_slash);
 
-    // Create parent directories recursively
+    /* Create parent directories recursively */
     std::string current_path;
     for (size_t i = 0; i < dir_path.length(); i++) {
       if (dir_path[i] == '/' && i > 0) {
@@ -516,17 +575,17 @@ void run_grpc_server(struct scx_ossim *skel) {
         }
       }
     }
-    // Create final directory (only root can write to it for security)
+    /* Create final directory (only root can write to it for security) */
     if (mkdir(dir_path.c_str(), 0755) != 0 && errno != EEXIST) {
       fprintf(stderr, "Failed to create directory %s: %s\n", dir_path.c_str(),
               strerror(errno));
       return;
     }
-    // Ensure directory has correct permissions even if it already existed
+    /* Ensure directory has correct permissions even if it already existed */
     chmod(dir_path.c_str(), 0755);
   }
 
-  // Remove existing Unix socket if it exists
+  /* Remove existing Unix socket if it exists */
   unlink(OSSIMD_DEFAULT_SOCKET_PATH);
 
   grpc::ServerBuilder builder;
@@ -541,7 +600,7 @@ void run_grpc_server(struct scx_ossim *skel) {
     return;
   }
 
-  // Set socket file permissions to allow all users to connect
+  /* Set socket file permissions to allow all users to connect */
   if (chmod(OSSIMD_DEFAULT_SOCKET_PATH, 0666) != 0) {
     fprintf(stderr, "Warning: Failed to set socket permissions: %s\n",
             strerror(errno));
@@ -549,7 +608,7 @@ void run_grpc_server(struct scx_ossim *skel) {
 
   printf("gRPC server listening on %s\n", server_address.c_str());
 
-  // Wait for shutdown request
+  /* Wait for shutdown request */
   while (!exit_req) {
     sleep(1);
   }
@@ -559,32 +618,19 @@ void run_grpc_server(struct scx_ossim *skel) {
 }
 
 int main(int argc, char **argv) {
-  struct scx_ossim *skel;
-  struct bpf_link *link;
-  __u32 opt;
-  __u64 ecode;
+  OssimKernelInterface kernel;
+  int opt;
 
-  libbpf_set_print(libbpf_print_fn);
   signal(SIGINT, sigint_handler);
   signal(SIGTERM, sigint_handler);
 
-restart:
-  skel = SCX_OPS_OPEN(ossim_ops, scx_ossim);
-
-  while ((opt = getopt(argc, argv, "vde:h")) != -1) {
+  while ((opt = getopt(argc, argv, "vdh")) != -1) {
     switch (opt) {
     case 'v':
       verbose = true;
       break;
     case 'd':
       sync_enabled = false;
-      break;
-    case 'e':
-      simt_epoch_ns = strtoull(optarg, NULL, 10);
-      if (simt_epoch_ns == 0) {
-        fprintf(stderr, "Invalid SIMT epoch value: %s\n", optarg);
-        return 1;
-      }
       break;
     case 'h':
       fprintf(stderr, help_fmt, basename(argv[0]));
@@ -595,34 +641,42 @@ restart:
     }
   }
 
-  skel->bss->sync_enabled = sync_enabled;
-  skel->bss->simt_epoch = simt_epoch_ns;
+  /* Open the kernel device */
+  if (!kernel.open()) {
+    fprintf(stderr, "Failed to open kernel device. Is the ossim module loaded?\n");
+    return 1;
+  }
 
-  SCX_OPS_LOAD(skel, ossim_ops, scx_ossim, uei);
-  link = SCX_OPS_ATTACH(skel, ossim_ops, scx_ossim);
+  printf("Connected to %s\n", OSSIM_DEVICE_PATH);
 
-  /* Store global skel reference for signal handlers */
-  global_skel = skel;
+  /* Set initial sync enabled state */
+  int ret = kernel.set_sync_enabled(sync_enabled);
+  if (ret < 0) {
+    fprintf(stderr, "Warning: Failed to set sync enabled state: %s\n",
+            strerror(-ret));
+  }
+
+  /* Store global kernel interface reference */
+  global_kernel_interface = &kernel;
 
   /* Start gRPC server in a separate thread */
-  std::thread grpc_thread(run_grpc_server, skel);
+  std::thread grpc_thread(run_grpc_server, &kernel);
 
   /* Main stats display loop */
-  while (!exit_req && !UEI_EXITED(skel, uei)) {
-    __u64 stats[SCX_OSSIM_NUM_STAT];
+  while (!exit_req) {
+    struct ossim_stats stats;
 
-    read_stats(skel, stats);
-    printf("[global_simt=%lu sync_enabled:%d]\n", skel->bss->global_simt,
-           skel->bss->sync_enabled);
-    printf("local=%llu global=%llu vcpu=%llu system=%llu vcpu_noenquable=%llu "
-           "vcpu_enquable_too_early=%llu\n",
-           stats[SCX_OSSIM_STAT_LOCAL_ENQUEUE],
-           stats[SCX_OSSIM_STAT_GLOBAL_ENQUEUE],
-           stats[SCX_OSSIM_STAT_VCPU_ENQUEUE],
-           stats[SCX_OSSIM_STAT_SYSTEM_ENQUEUE],
-           stats[SCX_OSSIM_STAT_VCPU_NOENQUABLE],
-           stats[SCX_OSSIM_STAT_VCPU_ENQUABLE_TOO_EARLY]);
-    print_registered_vcpus(skel);
+    ret = kernel.get_stats(&stats);
+    if (ret < 0) {
+      fprintf(stderr, "Failed to get stats: %s\n", strerror(-ret));
+    } else {
+      printf("[global_simt=%lu vcpu_count=%u sync_enabled:%d]\n",
+             (unsigned long)stats.global_simt, stats.vcpu_count, sync_enabled);
+      printf("vcpu=%llu system=%llu\n",
+             (unsigned long long)stats.vcpu_enqueues,
+             (unsigned long long)stats.system_enqueues);
+    }
+
     printf("\n");
     fflush(stdout);
     sleep(1);
@@ -631,11 +685,6 @@ restart:
   /* Wait for gRPC server to finish */
   grpc_thread.join();
 
-  bpf_link__destroy(link);
-  ecode = UEI_REPORT(skel, uei);
-  scx_ossim__destroy(skel);
-
-  if (UEI_ECODE_RESTART(ecode))
-    goto restart;
+  printf("ossimd shutdown complete\n");
   return 0;
 }

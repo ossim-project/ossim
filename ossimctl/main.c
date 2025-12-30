@@ -1,7 +1,7 @@
-/* ossimctl - Command-line control tool for ossimd scheduler
+/* ossimctl - Command-line control tool for ossimd
  *
- * This tool provides a CLI interface for communicating with the ossimd
- * scheduler daemon via the libossim library.
+ * This tool provides a CLI interface for communicating with ossimd
+ * via the libossim library.
  */
 
 #include <errno.h>
