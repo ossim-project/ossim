@@ -20,7 +20,7 @@ struct ossim_ctl {
 extern "C" {
 
 /**
- * ossim_ctl_connect - Connect to the scx_ossim scheduler daemon
+ * ossim_ctl_connect - Connect to ossimd
  */
 struct ossim_ctl *ossim_ctl_connect(const char *socket_path) {
   struct ossim_ctl *ctl;
@@ -49,7 +49,7 @@ struct ossim_ctl *ossim_ctl_connect(const char *socket_path) {
 }
 
 /**
- * ossim_ctl_disconnect - Disconnect from the scheduler daemon
+ * ossim_ctl_disconnect - Disconnect from ossimd
  */
 void ossim_ctl_disconnect(struct ossim_ctl *ctl) {
   if (!ctl) {

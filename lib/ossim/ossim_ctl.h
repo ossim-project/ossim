@@ -13,7 +13,7 @@ extern "C" {
 struct ossim_ctl;
 
 /**
- * ossim_ctl_connect - Connect to the scx_ossim scheduler daemon
+ * ossim_ctl_connect - Connect to ossimd
  * @socket_path: Path to the UNIX socket (NULL for default)
  *
  * Returns: Connection handle on success, NULL on failure
@@ -21,7 +21,7 @@ struct ossim_ctl;
 struct ossim_ctl *ossim_ctl_connect(const char *socket_path);
 
 /**
- * ossim_ctl_disconnect - Disconnect from the scheduler daemon
+ * ossim_ctl_disconnect - Disconnect from ossimd
  * @ctl: Connection handle
  */
 void ossim_ctl_disconnect(struct ossim_ctl *ctl);
