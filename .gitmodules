@@ -4,3 +4,6 @@
 [submodule "kernel"]
 	path = kernel
 	url = https://github.com/ossim-project/kernel.git
+[submodule "workloads"]
+	path = workloads
+	url = https://github.com/ossim-project/workloads.git
