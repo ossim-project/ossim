@@ -146,5 +146,10 @@ ossimctl --help
 
 ## Run example workloads
 
-Please clone the [workloads repository](https://github.com/ossim-project/workloads) and follow the instructions in the README.
+Initialize the workloads submodule:
 
+```sh
+git submodule update --init --recursive workloads
+```
+
+Refer to the instructions in `workloads/README.md` to run the example workloads.
