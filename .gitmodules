@@ -3,4 +3,4 @@
 	url = https://github.com/ossim-project/qemu.git
 [submodule "kernel"]
 	path = kernel
-	url = https://github.com/ossim-project/linux.git
+	url = https://github.com/ossim-project/kernel.git

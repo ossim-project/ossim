@@ -21,7 +21,7 @@ all:
 CLANG_FORMAT ?= clang-format
 CLANG_FORMAT_STYLE ?= $(project_root).clang-format
 
-SUDO_ENV ?= LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) PATH=$(PATH)
+SUDO_ENV ?= LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) PATH=$(PATH) PKG_CONFIG_PATH=$(PKG_CONFIG_PATH)
 ifdef SUDO_PASS
 SUDO ?= sh -c 'echo "$(SUDO_PASS)" | /usr/bin/sudo.ws -S $(SUDO_ENV) "$$@"' _
 else

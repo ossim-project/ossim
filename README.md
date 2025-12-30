@@ -69,7 +69,40 @@ make vng-kernel
 To install the kernel to the host system:
 
 ```sh
-make install-kernel 
+make install-kernel
+```
+
+### Persistent vng Instance for Development
+
+For continuous development and testing, you can run a persistent vng instance with SSH access via vsock:
+
+```sh
+# Start persistent vng instance with SSH via vsock (default CID 2025)
+make vng-start
+
+# Check status
+make vng-status
+
+# Run commands via SSH
+make VNG_CMD="uname -r" vng-run
+
+# Interactive SSH session
+make vng-ssh
+
+# Stop the instance
+make vng-stop
+```
+
+**Note:** SSH key-based authentication requires standard SSH keys in `~/.ssh/id_*.pub` (e.g., `id_ed25519.pub`). If you don't have one, generate it with:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+```
+
+For one-off commands without persistent state, use `vng-exec`:
+
+```sh
+make VNG_CMD="dmesg | tail" vng-exec
 ```
 
 

@@ -20,6 +20,7 @@ configure-kernel:
 	$(kernel_d)scripts/config \
 		--file $(kernel_b).config \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
+		--enable CONFIG_OSSIM \
 		--disable CONFIG_LOCALVERSION_AUTO \
 		--disable CONFIG_DEBUG_INFO_BTF \
 		--disable CONFIG_MODULE_SIG \
@@ -76,6 +77,10 @@ configure-kernel:
 configure-kernel-vng:
 	@mkdir -p $(kernel_b)
 	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(kernel_b))
+	$(kernel_d)scripts/config \
+		--file $(kernel_b).config \
+		--enable CONFIG_OSSIM
+	$(MAKE) -C $(kernel_d) O=$(abspath $(kernel_b)) olddefconfig
 
 # Build kernel
 .PHONY: build-kernel
@@ -121,6 +126,101 @@ vng-kernel-run: $(kernel_bzImage)
 # Quick rebuild and test cycle
 .PHONY: test-kernel
 test-kernel: build-kernel vng-kernel
+
+# Persistent vng instance with SSH access via vsock (no TCP port needed)
+# VNG_VSOCK_CID: vsock context ID for SSH (must be unique per VM, avoids TCP port conflicts)
+VNG_VSOCK_CID ?= 2025
+VNG_MEM ?= 8G
+VNG_CPUS ?= 4
+vng_b := $(b)vng/
+VNG_PIDFILE := $(vng_b)vng.pid
+VNG_LOG := $(vng_b)vng.log
+
+# Start vng as a background instance with SSH access via vsock
+.PHONY: vng-start
+vng-start: $(kernel_bzImage)
+	@mkdir -p $(vng_b)
+	@if [ -f $(VNG_PIDFILE) ] && kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
+		echo "vng already running (pid=$$(cat $(VNG_PIDFILE)))"; \
+		echo "Use 'make vng-ssh' to connect or 'make vng-stop' to stop"; \
+	else \
+		echo "Starting vng with SSH via vsock (cid=$(VNG_VSOCK_CID))..."; \
+		nohup $(VNG) --run $(abspath $(kernel_b)) --rw \
+			--memory $(VNG_MEM) --cpus $(VNG_CPUS) \
+			--ssh $(VNG_VSOCK_CID) $(VNG_OPTS) \
+			> $(VNG_LOG) 2>&1 & \
+		echo $$! > $(VNG_PIDFILE); \
+		sleep 5; \
+		if kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
+			echo "vng started (pid=$$(cat $(VNG_PIDFILE))). Use 'make vng-ssh' to connect."; \
+		else \
+			echo "vng failed to start. Check $(VNG_LOG)"; \
+			rm -f $(VNG_PIDFILE); \
+		fi \
+	fi
+
+# SSH into the running vng instance (uses vng's built-in ssh-client via vsock)
+.PHONY: vng-ssh
+vng-ssh:
+	@if [ -f $(VNG_PIDFILE) ] && kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
+		$(VNG) --ssh-client $(VNG_VSOCK_CID); \
+	else \
+		echo "No vng instance running. Use 'make vng-start' first."; \
+	fi
+
+# Run a command in the running vng instance via SSH
+# Usage: make vng-run VNG_CMD="uname -a"
+.PHONY: vng-run
+vng-run:
+	@if [ -f $(VNG_PIDFILE) ] && kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
+		$(VNG) --ssh-client $(VNG_VSOCK_CID) --remote-cmd "$(VNG_CMD)"; \
+	else \
+		echo "No vng instance running. Use 'make vng-start' first."; \
+	fi
+
+# Run a command in vng (uses fresh instance, no persistent connection needed)
+# Usage: make vng-exec VNG_CMD="uname -a"
+.PHONY: vng-exec
+vng-exec: $(kernel_bzImage)
+	$(VNG) --run $(abspath $(kernel_b)) --rw --exec "$(VNG_CMD)"
+
+# Stop the running vng instance
+.PHONY: vng-stop
+vng-stop:
+	@if [ -f $(VNG_PIDFILE) ]; then \
+		PID=$$(cat $(VNG_PIDFILE)); \
+		if kill -0 $$PID 2>/dev/null; then \
+			echo "Stopping vng (pid=$$PID)..."; \
+			kill $$PID; \
+			sleep 1; \
+			kill -9 $$PID 2>/dev/null || true; \
+			rm -f $(VNG_PIDFILE); \
+			echo "vng stopped."; \
+		else \
+			echo "vng not running (stale pidfile)."; \
+			rm -f $(VNG_PIDFILE); \
+		fi \
+	else \
+		echo "No vng instance running."; \
+	fi
+
+# Check vng status
+.PHONY: vng-status
+vng-status:
+	@if [ -f $(VNG_PIDFILE) ] && kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
+		echo "vng running (pid=$$(cat $(VNG_PIDFILE)), vsock cid=$(VNG_VSOCK_CID))"; \
+	else \
+		echo "vng not running"; \
+	fi
+
+# View vng log
+.PHONY: vng-log
+vng-log:
+	@if [ -f $(kernel_b).vng.log ]; then \
+		tail -50 $(kernel_b).vng.log; \
+	else \
+		echo "No vng log found."; \
+	fi
 
 # Dependency: ensure bzImage exists
 $(kernel_bzImage): build-kernel
