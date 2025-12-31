@@ -32,8 +32,6 @@ clean:
 	rm -rf $(CLEAN_ALL)
 .PHONY: clean
 
-include make/lib.mk
 include make/qemu.mk
 include make/kernel.mk
-include make/ossimd.mk
-include make/ossimctl.mk
+include make/libossim.mk
