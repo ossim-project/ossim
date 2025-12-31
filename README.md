@@ -26,6 +26,7 @@ Steps:
     export LIBRARY_PATH=${OSSIM_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
     export CPATH=${OSSIM_PREFIX}/include${CPATH:+:$CPATH}
     export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+    export CMAKE_PREFIX_PATH=${OSSIM_PREFIX}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}
     ```
 
 2. Install dependencies:
@@ -121,26 +122,26 @@ make install-qemu
 ```
 
 
-## Ossim Daemon (`ossimd`)
+## libossim
 
-`ossimd` is a user-space daemon that orchestrates the Ossim system. It loads and manages the Ossim SCX scheduler and serves as an gRPC server to communicate with Ossim QEMU instances.  
+`libossim` is the Ossim control library and daemon package. It includes:
+- **libossim**: C/C++ library for communicating with ossimd
+- **ossimd**: User-space daemon that orchestrates the Ossim system
+- **ossimctl**: Command-line interface to communicate with ossimd
 
-To build and run `ossimd`:
+To build and install:
 
 ```sh
-make ossimd
+# Build all components
+make libossim
+
+# Install to $OSSIM_PREFIX
+make install-libossim
+
+# Run ossimd
 make run-ossimd
-```
 
-## Ossim Control CLI (`ossimctl`)
-
-`ossimctl` is a command-line interface to communicate with `ossimd`.
-
-To build, install, and run `ossimctl`:
-```sh
-# This will build and install ossimctl to $OSSIM_PREFIX
-make install-ossimctl
-
+# Use ossimctl
 ossimctl --help
 ```
 

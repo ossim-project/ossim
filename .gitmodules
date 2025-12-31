@@ -7,3 +7,6 @@
 [submodule "workloads"]
 	path = workloads
 	url = https://github.com/ossim-project/workloads.git
+[submodule "libossim"]
+	path = libossim
+	url = https://github.com/ossim-project/libossim.git
