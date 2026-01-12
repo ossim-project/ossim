@@ -25,7 +25,7 @@ SUDO_ENV ?= LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) PATH=$(PATH) PKG_CONFIG_PATH=$(PK
 ifdef SUDO_PASS
 SUDO ?= sh -c 'echo "$(SUDO_PASS)" | /usr/bin/sudo.ws -S $(SUDO_ENV) "$$@"' _
 else
-SUDO ?= /usr/bin/sudo.ws $(SUDO_ENV)
+SUDO ?= sudo $(SUDO_ENV)
 endif
 
 clean: 
