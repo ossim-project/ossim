@@ -1,4 +1,5 @@
 # kernel.mk - Build and test custom kernel with virtme-ng
+LOCAL_KERNEL_CONFIG := /boot/config-$(shell uname -r)
 
 kernel_d := $(d)kernel
 
@@ -14,60 +15,19 @@ VNG_RW ?= 0
 .PHONY: configure-local-kernel
 configure-local-kernel:
 	@mkdir -p $(local_kernel_b)
-	cp /boot/config-`uname -r` $(local_kernel_b)/.config
+	@echo "Using config file $(LOCAL_KERNEL_CONFIG)"
+	cp $(LOCAL_KERNEL_CONFIG) $(local_kernel_b)/.config
 	$(kernel_d)/scripts/config \
 		--file $(local_kernel_b)/.config \
+		--disable CONFIG_LOCALVERSION_AUTO \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
 		--enable CONFIG_OSSIM \
-		--disable CONFIG_LOCALVERSION_AUTO \
 		--disable CONFIG_DEBUG_INFO_BTF \
 		--disable CONFIG_MODULE_SIG \
 		--disable CONFIG_MODULE_SIG_ALL \
 		--set-str CONFIG_SYSTEM_TRUSTED_KEYS "" \
 		--set-str CONFIG_SYSTEM_REVOCATION_KEYS "" \
 		--set-str CONFIG_MODULE_SIG_KEY ""
-	$(kernel_d)/scripts/config \
-		--file $(local_kernel_b)/.config \
-		--disable CONFIG_WIRELESS \
-		--disable CONFIG_WLAN \
-		--disable CONFIG_CFG80211 \
-		--disable CONFIG_MAC80211 \
-		--disable CONFIG_IWLWIFI \
-		--disable CONFIG_BT \
-		--disable CONFIG_IEEE802154 \
-		--disable CONFIG_NET_VENDOR_MELLANOX \
-		--disable CONFIG_MELLANOX_PLATFORM \
-		--disable CONFIG_INFINIBAND \
-		--disable CONFIG_COMEDI \
-		--disable CONFIG_IIO \
-		--disable CONFIG_I2C \
-		--disable CONFIG_SPI \
-		--disable CONFIG_GPIO \
-		--disable CONFIG_HID \
-		--disable CONFIG_MEDIA_SUPPORT \
-		--disable CONFIG_SOUND \
-		--disable CONFIG_INPUT_MOUSE \
-		--disable CONFIG_INPUT_JOYSTICK \
-		--disable CONFIG_INPUT_TABLET \
-		--disable CONFIG_INPUT_TOUCHSCREEN \
-		--disable CONFIG_INPUT_MISC \
-		--disable CONFIG_HID_SUPPORT \
-		--disable CONFIG_DRM \
-		--disable CONFIG_DRM_AMDGPU \
-		--disable CONFIG_DRM_VIRTIO_GPU \
-		--disable CONFIG_FB
-# 	$(kernel_d)/scripts/config \
-# 		--file $(local_kernel_b)/.config \
-# 		--enable CONFIG_VIRTIO \
-# 		--enable CONFIG_VIRTIO_PCI \
-# 		--enable CONFIG_VIRTIO_MMIO \
-# 		--enable CONFIG_NET_9P \
-# 		--enable CONFIG_NET_9P_VIRTIO \
-# 		--enable CONFIG_9P_FS \
-# 		--enable CONFIG_9P_FS_POSIX_ACL \
-# 		--enable CONFIG_VIRTIO_NET \
-# 		--enable CONFIG_VIRTIO_CONSOLE \
-# 		--enable CONFIG_VIRTIO_BLK
 	$(MAKE) -C $(kernel_d) O=$(abspath $(local_kernel_b)) olddefconfig
 
 # Configure kernel with virtme-ng defaults (minimal config for fast builds)
@@ -77,8 +37,9 @@ configure-vng-kernel::
 	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(vng_kernel_b))
 	$(kernel_d)/scripts/config \
 		--file $(vng_kernel_b)/.config \
+		--disable CONFIG_LOCALVERSION_AUTO \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
-		--enable CONFIG_OSSIM \
+		--enable CONFIG_OSSIM
 	$(MAKE) -C $(kernel_d) O=$(abspath $(vng_kernel_b)) olddefconfig
 
 $(vng_kernel_b)/.config:
