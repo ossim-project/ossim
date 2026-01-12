@@ -2,11 +2,11 @@
 #
 # This wraps the CMake-based libossim build system
 
-libossim_d := $(d)libossim/
-libossim_b := $(b)libossim/
+libossim_d := $(d)libossim
+libossim_b := $(b)libossim
 
 # Kernel UAPI headers for ossimd
-LIBOSSIM_KERNEL_UAPI := $(abspath $(kernel_d)include/uapi)
+LIBOSSIM_KERNEL_UAPI := $(abspath $(kernel_d)/include/uapi)
 
 # CMake configuration
 LIBOSSIM_CMAKE_ARGS := \
@@ -43,7 +43,7 @@ install-libossim: libossim
 # Run ossimd
 .PHONY: run-ossimd
 run-ossimd: libossim
-	$(SUDO) $(libossim_b)src/daemon/ossimd
+	$(SUDO) $(libossim_b)/src/daemon/ossimd
 
 # Clean libossim
 .PHONY: clean-libossim
