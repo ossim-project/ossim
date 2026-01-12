@@ -8,7 +8,7 @@ myqemu: $(myqemu)
 
 $(myqemu): build-qemu
 
-configure-qemu: install-lib
+configure-qemu: install-libossim
 	@mkdir -p $(qemu_b)
 	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
 		--prefix=$(abspath $(PREFIX)) \
@@ -18,7 +18,7 @@ configure-qemu: install-lib
 		--enable-kvm \
 		--enable-ossim
 
-qemu: install-lib
+qemu: install-libossim
 	$(MAKE) -C $(qemu_b) -j`nproc`
 
 install-qemu: qemu
