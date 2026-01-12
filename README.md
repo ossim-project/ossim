@@ -62,6 +62,12 @@ git submodule update --init --recursive --depth 1 kernel
 
 Build and install the kernel to the host system for full hardware testing:
 
+**Important:** The `configure-local-kernel` target uses `/boot/config-$(uname -r)` as the base configuration by default. If you are already booted into the Ossim kernel, this will use the previous Ossim kernel config instead of your original distro kernel config. To use a specific config file, override `LOCAL_KERNEL_CONFIG`:
+
+```sh
+make LOCAL_KERNEL_CONFIG=/boot/config-6.11.0-26-generic configure-local-kernel
+```
+
 ```sh
 # Configure kernel using host config
 make configure-local-kernel
