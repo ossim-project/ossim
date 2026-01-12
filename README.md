@@ -52,30 +52,80 @@ Steps:
 
 ## Ossim Kernel
 
-`kernel/` contains the Ossim custom Linux kernel. Build and test it using virtme-ng for rapid iteration:
+`kernel/` contains the Ossim custom Linux kernel. Initialize the submodule first:
+
+```sh
+git submodule update --init --recursive --depth 1 kernel
+```
+
+### Local Kernel (Host Installation)
+
+Build and install the kernel to the host system for full hardware testing:
 
 ```sh
 # Configure kernel using host config
-make configure-kernel
-# Alternatively, use virtme-ng defaults for minimal config
-make configure-kernel-vng
+make configure-local-kernel
 
 # Build kernel
-make build-kernel -j`nproc`
+make build-local-kernel
 
-# Test kernel with virtme-ng (boots with host filesystem)
+# Install kernel to the host system
+make install-local-kernel
+```
+
+#### Prevent Ossim Kernel from Becoming Default
+
+By default, GRUB boots the newest kernel, which means the ossim kernel would become the default after installation. To prevent this, configure GRUB to use a saved default and pin the current kernel:
+
+```sh
+# Configure GRUB to use saved default (do NOT add GRUB_SAVEDEFAULT=true)
+sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+sudo update-grub
+
+# List menu entries to find the menuentry_id for your current kernel
+grep "menuentry\|menuentry_id_option" /boot/grub/grub.cfg | head -30
+
+# Pin the current kernel using its menuentry_id (the gnulinux-...-advanced-... string)
+sudo grub-set-default "<menuentry_id>"
+
+# Verify the saved entry
+sudo grub-editenv list
+```
+
+**Note:** Do not enable `GRUB_SAVEDEFAULT=true`, as it would save any booted kernel (including one-time `grub-reboot` selections) as the new default.
+
+#### Boot into the Installed Kernel Once
+
+To test the ossim kernel without changing the default, use `grub-reboot` for a one-time boot:
+
+```sh
+# Set ossim kernel for next boot only using its menuentry_id
+sudo grub-reboot "<menuentry_id>"
+
+# Reboot into the selected kernel
+sudo reboot
+```
+
+After testing, a normal reboot returns to the pinned default kernel. If the ossim kernel fails to boot, a hard reset will also return to the default.
+
+### VNG Kernel (Rapid Development)
+
+Use virtme-ng for fast iteration without rebooting the host. This builds a minimal kernel config and boots it in a VM with your host filesystem:
+
+```sh
+# Configure kernel with virtme-ng defaults (minimal config for fast builds)
+make configure-vng-kernel
+
+# Build kernel
+make build-vng-kernel
+
+# Boot kernel with virtme-ng (uses host filesystem)
 make vng-kernel
 ```
 
-To install the kernel to the host system:
+#### Persistent vng Instance for Development
 
-```sh
-make install-kernel
-```
-
-### Persistent vng Instance for Development
-
-For continuous development and testing, you can run a persistent vng instance with SSH access via vsock:
+For continuous development and testing, run a persistent vng instance with SSH access via vsock:
 
 ```sh
 # Start persistent vng instance with SSH via vsock (default CID 2025)
@@ -106,22 +156,6 @@ For one-off commands without persistent state, use `vng-exec`:
 make VNG_CMD="dmesg | tail" vng-exec
 ```
 
-
-## QEMU with Ossim Integration
-
-`qemu/` contains a fork of QEMU with Ossim integration. We need to build it from source and install to `$OSSIM_PREFIX`:
-
-```sh
-git submodule update --init --recursive --depth 1 qemu
-
-# Configure QEMU with Ossim default configuration
-make configure-qemu
-
-# Build and install QEMU to $OSSIM_PREFIX
-make install-qemu
-```
-
-
 ## libossim
 
 `libossim` is the Ossim control library and daemon package. It includes:
@@ -132,6 +166,8 @@ make install-qemu
 To build and install:
 
 ```sh
+git submodule update --init --recursive libossim
+
 # Build all components
 make libossim
 
@@ -144,6 +180,22 @@ make run-ossimd
 # Use ossimctl
 ossimctl --help
 ```
+
+## QEMU with Ossim Integration
+
+`qemu/` contains a fork of QEMU with Ossim integration. We need to build it from source and install to `$OSSIM_PREFIX`:
+
+```sh
+git submodule update --init --recursive qemu
+
+# Configure QEMU with Ossim default configuration
+make configure-qemu
+
+# Build and install QEMU to $OSSIM_PREFIX
+make install-qemu
+```
+
+
 
 ## Run example workloads
 

@@ -1,17 +1,39 @@
 #!/bin/bash
 
+KERNEL_DEPS=(
+    build-essential
+    libncurses-dev
+    bison
+    flex
+    libssl-dev
+    libelf-dev
+    libdw-dev
+    fakeroot
+    bc
+    dwarves
+    lld
+    virtme-ng
+)
+
+MISC_DEPS=(
+    wget
+    git
+    qemu-system-x86
+    clang-format
+    bear
+)
+
+
 sudo apt-get update && sudo apt-get install -y \
-    libbpf-dev build-essential cmake \
+    ${KERNEL_DEPS[@]} \
+    ${MISC_DEPS[@]} \
+    cmake \
     clang llvm pkg-config libelf-dev \
     protobuf-compiler libprotobuf-dev libseccomp-dev \
-    git qemu-system-x86 \
     libglib2.0-dev libfdt-dev libpixman-1-dev \
-    zlib1g-dev ninja-build bear \
-    build-essential libncurses-dev bison flex \
-    libssl-dev libelf-dev bc dwarves \
+    zlib1g-dev ninja-build \
     guestfish cloud-image-utils \
     libfuse3-dev libcap-ng-dev \
-    lld \
     meson ninja-build \
     xsltproc libxslt1-dev libgnutls28-dev \
     python3-docutils libjson-c-dev \
@@ -20,8 +42,6 @@ sudo apt-get update && sudo apt-get install -y \
     libnuma-dev \
     rustup \
     unzip \
-    clang-format \
-    autoconf libtool \
-    virtme-ng
+    autoconf libtool
 
 rustup default stable

@@ -1,11 +1,9 @@
 # kernel.mk - Build and test custom kernel with virtme-ng
 
-kernel_d := $(d)kernel/
-kernel_b := $(b)kernel/
-kernel_o := $(o)kernel/
+kernel_d := $(d)kernel
 
-kernel_vmlinux := $(kernel_b)vmlinux
-kernel_bzImage := $(kernel_b)arch/x86/boot/bzImage
+local_kernel_b := $(b)kernel.local
+vng_kernel_b := $(b)kernel.vng
 
 # virtme-ng configuration
 VNG ?= vng
@@ -13,12 +11,12 @@ VNG_OPTS ?=
 VNG_RW ?= 0
 
 # Configure kernel from host config with disabled problematic options
-.PHONY: configure-kernel
-configure-kernel:
-	@mkdir -p $(kernel_b)
-	cp /boot/config-`uname -r` $(kernel_b).config
-	$(kernel_d)scripts/config \
-		--file $(kernel_b).config \
+.PHONY: configure-local-kernel
+configure-local-kernel:
+	@mkdir -p $(local_kernel_b)
+	cp /boot/config-`uname -r` $(local_kernel_b)/.config
+	$(kernel_d)/scripts/config \
+		--file $(local_kernel_b)/.config \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
 		--enable CONFIG_OSSIM \
 		--disable CONFIG_LOCALVERSION_AUTO \
@@ -28,8 +26,8 @@ configure-kernel:
 		--set-str CONFIG_SYSTEM_TRUSTED_KEYS "" \
 		--set-str CONFIG_SYSTEM_REVOCATION_KEYS "" \
 		--set-str CONFIG_MODULE_SIG_KEY ""
-	$(kernel_d)scripts/config \
-		--file $(kernel_b).config \
+	$(kernel_d)/scripts/config \
+		--file $(local_kernel_b)/.config \
 		--disable CONFIG_WIRELESS \
 		--disable CONFIG_WLAN \
 		--disable CONFIG_CFG80211 \
@@ -58,8 +56,8 @@ configure-kernel:
 		--disable CONFIG_DRM_AMDGPU \
 		--disable CONFIG_DRM_VIRTIO_GPU \
 		--disable CONFIG_FB
-# 	$(kernel_d)scripts/config \
-# 		--file $(kernel_b).config \
+# 	$(kernel_d)/scripts/config \
+# 		--file $(local_kernel_b)/.config \
 # 		--enable CONFIG_VIRTIO \
 # 		--enable CONFIG_VIRTIO_PCI \
 # 		--enable CONFIG_VIRTIO_MMIO \
@@ -70,51 +68,56 @@ configure-kernel:
 # 		--enable CONFIG_VIRTIO_NET \
 # 		--enable CONFIG_VIRTIO_CONSOLE \
 # 		--enable CONFIG_VIRTIO_BLK
-	$(MAKE) -C $(kernel_d) O=$(abspath $(kernel_b)) olddefconfig
+	$(MAKE) -C $(kernel_d) O=$(abspath $(local_kernel_b)) olddefconfig
 
 # Configure kernel with virtme-ng defaults (minimal config for fast builds)
-.PHONY: configure-kernel-vng
-configure-kernel-vng:
-	@mkdir -p $(kernel_b)
-	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(kernel_b))
-	$(kernel_d)scripts/config \
-		--file $(kernel_b).config \
-		--enable CONFIG_OSSIM
-	$(MAKE) -C $(kernel_d) O=$(abspath $(kernel_b)) olddefconfig
+.PHONY: configure-vng-kernel
+configure-vng-kernel::
+	@mkdir -p $(vng_kernel_b)
+	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(vng_kernel_b))
+	$(kernel_d)/scripts/config \
+		--file $(vng_kernel_b)/.config \
+		--set-str CONFIG_LOCALVERSION "-ossim" \
+		--enable CONFIG_OSSIM \
+	$(MAKE) -C $(kernel_d) O=$(abspath $(vng_kernel_b)) olddefconfig
+
+$(vng_kernel_b)/.config:
+	$(MAKE) configure-vng-kernel
+
+$(local_kernel_b)/.config:
+	$(MAKE) configure-local-kernel
 
 # Build kernel
-.PHONY: build-kernel
-build-kernel: $(kernel_b).config
-	$(MAKE) LD=ld.lld -C $(kernel_b)
+.PHONY: build-local-kernel
+build-local-kernel: $(local_kernel_b)/.config
+	$(MAKE) LD=ld.lld -C $(local_kernel_b) -j`nproc`
+	$(MAKE) LD=ld.lld -C $(local_kernel_b) modules -j`nproc`
 
-# Build kernel modules only
-.PHONY: build-kernel-modules
-build-kernel-modules: $(kernel_b).config
-	$(MAKE) LD=ld.lld -C $(kernel_b) modules
+.PHONY: install-local-kernel
+install-local-kernel: build-local-kernel
+	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install install
 
-# Install kernel to host system
-.PHONY: install-kernel
-install-kernel: $(kernel_bzImage)
-	$(SUDO) $(MAKE) -C $(kernel_b) modules_install install
+.PHONY: build-vng-kernel
+build-vng-kernel: $(vng_kernel_b)/.config
+	$(MAKE) LD=ld.lld -C $(vng_kernel_b) -j`nproc`
 
-# Clean kernel build
-.PHONY: clean-kernel
-clean-kernel:
-	rm -rf $(kernel_b) $(kernel_o)
+
+.PHONY: clean-local-kernel
+clean-local-kernel:
+	rm -rf $(local_kernel_b)
+
+.PHONY: clean-vng-kernel
+clean-vng-kernel:
+	rm -rf $(vng_kernel_b)
 
 # Boot kernel with virtme-ng using host filesystem (read-only by default)
 .PHONY: vng-kernel
-vng-kernel: $(kernel_bzImage)
+vng-kernel:
 ifeq ($(VNG_RW),1)
-	$(VNG) --run $(abspath $(kernel_b)) --rw $(VNG_OPTS)
+	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS)
 else
-	$(VNG) --run $(abspath $(kernel_b)) $(VNG_OPTS)
+	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS)
 endif
-
-# Boot kernel with virtme-ng in read-write mode
-.PHONY: vng-kernel-rw
-vng-kernel-rw: $(kernel_bzImage)
-	$(VNG) --run $(abspath $(kernel_b)) --rw $(VNG_OPTS)
 
 # Boot kernel with virtme-ng and run a specific command
 # Usage: make vng-kernel-run VNG_CMD="uname -a"
@@ -125,7 +128,7 @@ vng-kernel-run: $(kernel_bzImage)
 
 # Quick rebuild and test cycle
 .PHONY: test-kernel
-test-kernel: build-kernel vng-kernel
+test-kernel: build-vng-kernel vng-kernel
 
 # Persistent vng instance with SSH access via vsock (no TCP port needed)
 # VNG_VSOCK_CID: vsock context ID for SSH (must be unique per VM, avoids TCP port conflicts)
@@ -221,9 +224,3 @@ vng-log:
 	else \
 		echo "No vng log found."; \
 	fi
-
-# Dependency: ensure bzImage exists
-$(kernel_bzImage): build-kernel
-
-$(kernel_b).config:
-	$(MAKE) configure-kernel
