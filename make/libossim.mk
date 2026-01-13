@@ -16,7 +16,7 @@ LIBOSSIM_CMAKE_ARGS := \
 
 # Configure libossim
 .PHONY: configure-libossim
-configure-libossim:
+configure-libossim: clean-libossim
 	@mkdir -p $(libossim_b)
 	cd $(libossim_b) && cmake $(LIBOSSIM_CMAKE_ARGS) $(abspath $(libossim_d))
 
@@ -48,9 +48,7 @@ run-ossimd: libossim
 # Clean libossim
 .PHONY: clean-libossim
 clean-libossim:
-	@if [ -f $(libossim_b)/Makefile ]; then \
-		$(MAKE) -C $(libossim_b) clean; \
-	fi
+	rm -rf $(libossim_b)
 
 # Full clean (remove build directory)
 .PHONY: distclean-libossim
