@@ -13,26 +13,28 @@ VNG_RW ?= 0
 
 # Configure kernel from host config with disabled problematic options
 .PHONY: configure-local-kernel
-configure-local-kernel:
+configure-local-kernel: clean-local-kernel
 	@mkdir -p $(local_kernel_b)
 	@echo "Using config file $(LOCAL_KERNEL_CONFIG)"
 	cp $(LOCAL_KERNEL_CONFIG) $(local_kernel_b)/.config
 	$(kernel_d)/scripts/config \
 		--file $(local_kernel_b)/.config \
-		--disable CONFIG_LOCALVERSION_AUTO \
-		--set-str CONFIG_LOCALVERSION "-ossim" \
-		--enable CONFIG_OSSIM \
 		--disable CONFIG_DEBUG_INFO_BTF \
 		--disable CONFIG_MODULE_SIG \
 		--disable CONFIG_MODULE_SIG_ALL \
 		--set-str CONFIG_SYSTEM_TRUSTED_KEYS "" \
 		--set-str CONFIG_SYSTEM_REVOCATION_KEYS "" \
 		--set-str CONFIG_MODULE_SIG_KEY ""
+	$(kernel_d)/scripts/config \
+		--file $(local_kernel_b)/.config \
+		--disable CONFIG_LOCALVERSION_AUTO \
+		--set-str CONFIG_LOCALVERSION "-ossim" \
+		--enable CONFIG_OSSIM
 	$(MAKE) -C $(kernel_d) O=$(abspath $(local_kernel_b)) olddefconfig
 
 # Configure kernel with virtme-ng defaults (minimal config for fast builds)
 .PHONY: configure-vng-kernel
-configure-vng-kernel::
+configure-vng-kernel: clean-vng-kernel
 	@mkdir -p $(vng_kernel_b)
 	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(vng_kernel_b))
 	$(kernel_d)/scripts/config \
@@ -80,13 +82,6 @@ else
 	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS)
 endif
 
-# Boot kernel with virtme-ng and run a specific command
-# Usage: make vng-kernel-run VNG_CMD="uname -a"
-VNG_CMD ?= uname -a
-.PHONY: vng-kernel-run
-vng-kernel-run: $(kernel_bzImage)
-	$(VNG) --run $(abspath $(kernel_b)) --exec "$(VNG_CMD)"
-
 # Quick rebuild and test cycle
 .PHONY: test-kernel
 test-kernel: build-vng-kernel vng-kernel
@@ -102,14 +97,14 @@ VNG_LOG := $(vng_b)vng.log
 
 # Start vng as a background instance with SSH access via vsock
 .PHONY: vng-start
-vng-start: $(kernel_bzImage)
+vng-start:
 	@mkdir -p $(vng_b)
 	@if [ -f $(VNG_PIDFILE) ] && kill -0 $$(cat $(VNG_PIDFILE)) 2>/dev/null; then \
 		echo "vng already running (pid=$$(cat $(VNG_PIDFILE)))"; \
 		echo "Use 'make vng-ssh' to connect or 'make vng-stop' to stop"; \
 	else \
 		echo "Starting vng with SSH via vsock (cid=$(VNG_VSOCK_CID))..."; \
-		nohup $(VNG) --run $(abspath $(kernel_b)) --rw \
+		nohup $(VNG) --run $(abspath $(vng_kernel_b)) --rw \
 			--memory $(VNG_MEM) --cpus $(VNG_CPUS) \
 			--ssh $(VNG_VSOCK_CID) $(VNG_OPTS) \
 			> $(VNG_LOG) 2>&1 & \
@@ -145,8 +140,8 @@ vng-run:
 # Run a command in vng (uses fresh instance, no persistent connection needed)
 # Usage: make vng-exec VNG_CMD="uname -a"
 .PHONY: vng-exec
-vng-exec: $(kernel_bzImage)
-	$(VNG) --run $(abspath $(kernel_b)) --rw --exec "$(VNG_CMD)"
+vng-exec:
+	$(VNG) --run $(abspath $(vng_kernel_b)) --rw --exec "$(VNG_CMD)"
 
 # Stop the running vng instance
 .PHONY: vng-stop
@@ -166,6 +161,14 @@ vng-stop:
 		fi \
 	else \
 		echo "No vng instance running."; \
+	fi
+	@# Clean up any stale QEMU processes holding the vsock CID
+	@STALE_PIDS=$$(pgrep -f "qemu.*guest-cid=$(VNG_VSOCK_CID)" 2>/dev/null); \
+	if [ -n "$$STALE_PIDS" ]; then \
+		echo "Cleaning up stale QEMU processes: $$STALE_PIDS"; \
+		kill $$STALE_PIDS 2>/dev/null || true; \
+		sleep 1; \
+		kill -9 $$STALE_PIDS 2>/dev/null || true; \
 	fi
 
 # Check vng status
