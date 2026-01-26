@@ -73,7 +73,7 @@ make LOCAL_KERNEL_CONFIG=/boot/config-6.11.0-26-generic configure-local-kernel
 make configure-local-kernel
 
 # Build kernel
-make build-local-kernel
+make local-kernel
 
 # Install kernel to the host system
 make install-local-kernel
@@ -114,7 +114,7 @@ sudo reboot
 
 After testing, a normal reboot returns to the pinned default kernel. If the ossim kernel fails to boot, a hard reset will also return to the default.
 
-### VNG Kernel (Rapid Development)
+### VNG Kernel (Development)
 
 Use virtme-ng for fast iteration without rebooting the host. This builds a minimal kernel config and boots it in a VM with your host filesystem:
 
@@ -123,10 +123,10 @@ Use virtme-ng for fast iteration without rebooting the host. This builds a minim
 make configure-vng-kernel
 
 # Build kernel
-make build-vng-kernel
+make vng-kernel
 
 # Boot kernel with virtme-ng (uses host filesystem)
-make vng-kernel
+make run-vng
 ```
 
 #### Persistent vng Instance for Development
@@ -135,19 +135,19 @@ For continuous development and testing, run a persistent vng instance with SSH a
 
 ```sh
 # Start persistent vng instance with SSH via vsock (default CID 2025)
-make vng-start
+make start-vng
 
 # Check status
 make vng-status
 
 # Run commands via SSH
-make VNG_CMD="uname -r" vng-run
+make VNG_CMD="uname -r" run-vng
 
 # Interactive SSH session
-make vng-ssh
+make ssh-vng
 
 # Stop the instance
-make vng-stop
+make stop-vng
 ```
 
 **Note:** SSH key-based authentication requires standard SSH keys in `~/.ssh/id_*.pub` (e.g., `id_ed25519.pub`). If you don't have one, generate it with:
@@ -156,10 +156,10 @@ make vng-stop
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 ```
 
-For one-off commands without persistent state, use `vng-exec`:
+For one-off commands without persistent state, use `exec-vng`:
 
 ```sh
-make VNG_CMD="dmesg | tail" vng-exec
+make VNG_CMD="dmesg | tail" exec-vng
 ```
 
 ## libossim
