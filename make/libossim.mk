@@ -5,6 +5,9 @@
 libossim_d := $(d)libossim
 libossim_b := $(b)libossim
 
+OSSIM_YIELD_INTERVAL ?= 10000
+OSSIM_YIELD_DURATION ?= 1
+
 # Kernel UAPI headers for ossimd
 LIBOSSIM_KERNEL_UAPI := $(abspath $(kernel_d)/include/uapi)
 
@@ -43,7 +46,7 @@ install-libossim: libossim
 # Run ossimd
 .PHONY: run-ossimd
 run-ossimd: libossim
-	$(SUDO) $(libossim_b)/src/daemon/ossimd
+	$(SUDO) $(libossim_b)/src/daemon/ossimd -y $(OSSIM_YIELD_INTERVAL) -d $(OSSIM_YIELD_DURATION)
 
 # Clean libossim
 .PHONY: clean-libossim
