@@ -41,7 +41,8 @@ configure-vng-kernel: clean-vng-kernel
 		--file $(vng_kernel_b)/.config \
 		--disable CONFIG_LOCALVERSION_AUTO \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
-		--enable CONFIG_OSSIM
+		--enable CONFIG_OSSIM \
+		--enable CONFIG_OSSIM_DEBUG
 	$(MAKE) -C $(kernel_d) O=$(abspath $(vng_kernel_b)) olddefconfig
 
 $(vng_kernel_b)/.config:
@@ -62,6 +63,7 @@ install-local-kernel:
 
 .PHONY: vng-kernel
 vng-kernel: $(vng_kernel_b)/.config
+	$(MAKE) stop-vng || true
 	$(MAKE) LD=ld.lld -C $(vng_kernel_b) -j`nproc`
 
 
@@ -131,7 +133,7 @@ ssh-vng:
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 			$(USER)@localhost "cd $(CURDIR) && exec bash -l"; \
 	else \
-		echo "No vng instance running. Use 'make vng-start' first."; \
+		echo "No vng instance running. Use 'make start-vng' first."; \
 	fi
 
 # Run a command in vng (uses fresh instance, no persistent connection needed)
@@ -191,3 +193,8 @@ vng-log:
 	else \
 		echo "No vng log found."; \
 	fi
+
+.PHONY: watch-dmesg
+watch-dmesg:
+	watch -n 1 "sudo dmesg | tail -20"
+	
