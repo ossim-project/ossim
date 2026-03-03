@@ -8,7 +8,7 @@ myqemu: $(myqemu)
 
 $(myqemu): build-qemu
 
-configure-qemu: install-libossim
+configure-qemu: install-libossim update-qemu-kernel-headers
 	@mkdir -p $(qemu_b)
 	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
 		--prefix=$(abspath $(PREFIX)) \
@@ -16,8 +16,12 @@ configure-qemu: install-libossim
 		--enable-numa \
 		--enable-slirp \
 		--enable-kvm \
-		--enable-ossim \
-		--extra-cflags="-I$(abspath $(kernel_d)/include/uapi)"
+		--enable-ossim
+
+update-qemu-kernel-headers:
+	cp $(kernel_d)/include/uapi/linux/ossim.h $(qemu_d)/linux-headers/linux/ossim.h
+
+.PHONY: update-qemu-kernel-headers
 
 qemu: install-libossim
 	$(MAKE) -C $(qemu_b) -j`nproc`
