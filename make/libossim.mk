@@ -5,8 +5,6 @@
 libossim_d := $(d)libossim
 libossim_b := $(b)libossim
 
-OSSIM_YIELD_INTERVAL ?= 10000
-OSSIM_YIELD_DURATION ?= 1
 
 # Kernel UAPI headers for ossimd
 LIBOSSIM_KERNEL_UAPI := $(abspath $(kernel_d)/include/uapi)
