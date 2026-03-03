@@ -16,7 +16,8 @@ configure-qemu: install-libossim
 		--enable-numa \
 		--enable-slirp \
 		--enable-kvm \
-		--enable-ossim
+		--enable-ossim \
+		--extra-cflags="-I$(abspath $(kernel_d)/include/uapi)"
 
 qemu: install-libossim
 	$(MAKE) -C $(qemu_b) -j`nproc`
