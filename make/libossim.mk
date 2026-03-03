@@ -46,7 +46,7 @@ install-libossim: libossim
 # Run ossimd
 .PHONY: run-ossimd
 run-ossimd: libossim
-	$(SUDO) $(libossim_b)/src/daemon/ossimd -y $(OSSIM_YIELD_INTERVAL) -d $(OSSIM_YIELD_DURATION)
+	$(SUDO) $(libossim_b)/src/daemon/ossimd
 
 # Clean libossim
 .PHONY: clean-libossim

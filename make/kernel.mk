@@ -7,8 +7,11 @@ local_kernel_b := $(b)kernel.local
 vng_kernel_b := $(b)kernel.vng
 
 # virtme-ng configuration
+VNG_MEM ?= 8G
+VNG_CPUS ?= 8
+
 VNG ?= vng
-VNG_OPTS ?=
+VNG_OPTS ?= --memory $(VNG_MEM) --cpus $(VNG_CPUS)
 VNG_RW ?= 0
 
 # Configure kernel from host config with disabled problematic options
@@ -90,8 +93,6 @@ test-kernel: vng-kernel run-vng
 
 # Persistent vng instance with SSH access via TCP port
 VNG_SSH_PORT ?= 12222
-VNG_MEM ?= 8G
-VNG_CPUS ?= 8
 vng_b := $(b)vng/
 VNG_PIDFILE := $(vng_b)vng.pid
 VNG_LOG := $(vng_b)vng.log
@@ -106,7 +107,6 @@ start-vng:
 	else \
 		echo "Starting vng with SSH via TCP (port=$(VNG_SSH_PORT))..."; \
 		nohup $(VNG) --run $(abspath $(vng_kernel_b)) --rw \
-			--memory $(VNG_MEM) --cpus $(VNG_CPUS) \
 			--ssh $(VNG_SSH_PORT) --ssh-tcp $(VNG_OPTS) \
 			> $(VNG_LOG) 2>&1 & \
 		echo $$! > $(VNG_PIDFILE); \
