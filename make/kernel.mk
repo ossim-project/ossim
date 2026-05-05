@@ -64,6 +64,17 @@ local-kernel: $(local_kernel_b)/.config
 install-local-kernel:
 	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install install
 
+# Boot the installed local kernel via kexec
+.PHONY: kexec-local-kernel
+kexec-local-kernel:
+	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		echo "Loading kernel $$KREL via kexec..." && \
+		$(SUDO) kexec -l /boot/vmlinuz-$$KREL \
+			--initrd=/boot/initrd.img-$$KREL \
+			--reuse-cmdline && \
+		echo "Switching to $$KREL via kexec..." && \
+		$(SUDO) systemctl kexec
+
 .PHONY: vng-kernel
 vng-kernel: $(vng_kernel_b)/.config
 	$(MAKE) stop-vng || true
