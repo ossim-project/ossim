@@ -1,5 +1,5 @@
 # kernel.mk - Build and test custom kernel with virtme-ng
-LOCAL_KERNEL_CONFIG := /boot/config-$(shell uname -r)
+HOST_KERNEL_CONFIG := /boot/config-$(shell uname -r)
 
 kernel_d := $(d)kernel
 
@@ -18,8 +18,8 @@ VNG_RW ?= 0
 .PHONY: configure-local-kernel
 configure-local-kernel: clean-local-kernel
 	@mkdir -p $(local_kernel_b)
-	@echo "Using config file $(LOCAL_KERNEL_CONFIG)"
-	cp $(LOCAL_KERNEL_CONFIG) $(local_kernel_b)/.config
+	@echo "Using config file $(HOST_KERNEL_CONFIG)"
+	cp $(HOST_KERNEL_CONFIG) $(local_kernel_b)/.config
 	$(kernel_d)/scripts/config \
 		--file $(local_kernel_b)/.config \
 		--disable CONFIG_DEBUG_INFO_BTF \
@@ -57,12 +57,19 @@ $(local_kernel_b)/.config:
 # Build kernel
 .PHONY: local-kernel
 local-kernel: $(local_kernel_b)/.config
-	$(MAKE) LD=ld.lld -C $(local_kernel_b) -j`nproc`
-	$(MAKE) LD=ld.lld -C $(local_kernel_b) modules -j`nproc`
+	$(MAKE) LD=ld.lld -C $(local_kernel_b) -j$(JOBS)
+	$(MAKE) LD=ld.lld -C $(local_kernel_b) modules -j$(JOBS)
+
+.PHONY: install-local-kernel-modules
+install-local-kernel-modules:
+	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install
 
 .PHONY: install-local-kernel
 install-local-kernel:
-	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install install
+	$(SUDO) $(MAKE) -C $(local_kernel_b) install
+
+.PHONY: install-local-kernel-all
+install-local-kernel-all: local-kernel install-local-kernel-modules install-local-kernel
 
 # Boot the installed local kernel via kexec
 .PHONY: kexec-local-kernel
@@ -78,7 +85,7 @@ kexec-local-kernel:
 .PHONY: vng-kernel
 vng-kernel: $(vng_kernel_b)/.config
 	$(MAKE) stop-vng || true
-	$(MAKE) LD=ld.lld -C $(vng_kernel_b) -j`nproc`
+	$(MAKE) LD=ld.lld -C $(vng_kernel_b) -j$(JOBS)
 
 
 .PHONY: clean-local-kernel
