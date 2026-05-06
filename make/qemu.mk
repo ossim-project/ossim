@@ -25,7 +25,7 @@ update-qemu-kernel-headers:
 .PHONY: update-qemu-kernel-headers
 
 qemu: install-libossim
-	$(MAKE) -C $(qemu_b) -j`nproc`
+	$(MAKE) -C $(qemu_b) -j$(JOBS)
 
 install-qemu: qemu
 	$(MAKE) -C $(qemu_b) install

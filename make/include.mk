@@ -1,9 +1,11 @@
-# Output directory 
+# Output directory
 OUTPUT ?= out/
-# Build directory 
+# Build directory
 BUILD ?= build/
 # Prefix
 PREFIX ?= /usr/local/ossim/
+# Parallel build jobs
+JOBS ?= $(shell nproc)
 
 OUTPUT := $(if $(filter %/,$(OUTPUT)),$(OUTPUT),$(OUTPUT)/)
 BUILD := $(if $(filter %/,$(BUILD)),$(BUILD),$(BUILD)/)

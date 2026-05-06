@@ -27,7 +27,7 @@ libossim:
 	@if [ ! -f $(libossim_b)/Makefile ]; then \
 		$(MAKE) configure-libossim; \
 	fi
-	$(MAKE) -C $(libossim_b) -j$$(nproc)
+	$(MAKE) -C $(libossim_b) -j$(JOBS)
 
 # Build individual components
 .PHONY: ossimd
