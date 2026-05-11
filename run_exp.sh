@@ -427,7 +427,29 @@ phase_build_deploy() {
     local logf="$RUN_DIR/logs/build_deploy.log"
     export OSSIM_REMOTE_TARGET="$TARGET"
 
-    for tgt in remote-vng-kernel remote-libossim remote-qemu; do
+    # Mode-aware target list. multi_vm_barrier benchmarks need ossim live
+    # on the host kernel, so build + install the local (host) ossim kernel
+    # — vng is intentionally NOT used for benchmarking (nested KVM would
+    # break sync semantics). native (physical) needs only userspace bits.
+    local mode; mode="$(desc_get '.mode // "native"')"
+    local targets
+    case "$mode" in
+        multi_vm_barrier)
+            # `install-*` variants: build targets alone (e.g. `qemu`,
+            # `libossim`) only compile into $build/; we need the binaries
+            # actually deployed under $prefix/ so qemu launches and
+            # ossimctl uses the just-built code. `install-local-kernel`
+            # only refreshes /boot/vmlinuz-* + initrd (modules stay
+            # stale to save time); pair with the kexec preflight gate.
+            targets=(remote-local-kernel remote-install-local-kernel \
+                     remote-install-libossim remote-install-qemu)
+            ;;
+        *)
+            targets=(remote-install-libossim remote-install-qemu)
+            ;;
+    esac
+
+    for tgt in "${targets[@]}"; do
         log_to "running: make $tgt (OSSIM_REMOTE_TARGET=$TARGET)"
         if ! make -C "$REPO_ROOT" "$tgt" >>"$logf" 2>&1; then
             log_to "make $tgt failed; tail -20 of $logf:"
@@ -588,6 +610,49 @@ phase_run_collect_multi_vm_barrier() {
         log_to "warning: cannot verify image auto-run hook via virt-cat (libguestfs absent or image-side check failed). Proceeding; if ready markers never appear, rebuild the image: make -C workloads dimg-microbench"
     fi
 
+    # Kexec gate: the multi_vm_barrier mode needs /dev/ossim live on the
+    # host kernel. If lab is currently on a non-ossim kernel, switch to
+    # the locally-installed ossim kernel via `make kexec-local-kernel`.
+    # kexec drops the SSH session at systemctl kexec time (expected); the
+    # runner waits for SSH to come back, then re-verifies /dev/ossim.
+    log_to "preflight: verify running kernel exposes /dev/ossim"
+    local host_kernel; host_kernel="$(remote 'uname -r' 2>/dev/null || echo unknown)"
+    log_to "  current kernel on $TARGET: $host_kernel"
+    if ! remote "[ -c /dev/ossim ]"; then
+        log_to "  /dev/ossim absent on $host_kernel; invoking kexec to local ossim kernel"
+        local kexec_t0; kexec_t0=$(date +%s)
+        # `make remote-kexec-local-kernel` runs `ssh -t lab '... && systemctl kexec'`;
+        # the ssh exits non-zero when the host kexecs out from under it.
+        # We don't treat that exit as a failure — we verify by reconnect.
+        make -C "$REPO_ROOT" remote-kexec-local-kernel >>"$RUN_DIR/logs/kexec.log" 2>&1 || true
+        log_to "  kexec initiated; waiting for SSH on $TARGET to come back (cap 180s)"
+        local kexec_deadline=$(( $(date +%s) + 180 ))
+        local ssh_back=0
+        while (( $(date +%s) < kexec_deadline )); do
+            if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+                   "$TARGET" true 2>/dev/null; then
+                ssh_back=1; break
+            fi
+            sleep 3
+        done
+        local kexec_elapsed=$(( $(date +%s) - kexec_t0 ))
+        if (( ssh_back == 0 )); then
+            state_set run_collect phase_fail '{"detail":"kexec: SSH did not return within 180s"}'
+            manifest_record_phase run_collect phase_fail $(( $(date +%s) - t0 ))
+            die "lab did not come back after kexec within 180s (elapsed ${kexec_elapsed}s)"
+        fi
+        log_to "  SSH back after ${kexec_elapsed}s; re-verifying /dev/ossim"
+        host_kernel="$(remote 'uname -r' 2>/dev/null || echo unknown)"
+        echo "{\"kexec_reconnect_sec\": $kexec_elapsed, \"kernel_after\": \"$host_kernel\"}" \
+            > "$RUN_DIR/artifacts/kexec_timing.json"
+        if ! remote "[ -c /dev/ossim ]"; then
+            state_set run_collect phase_fail '{"detail":"/dev/ossim still absent after kexec","kernel_after":"'"$host_kernel"'"}'
+            manifest_record_phase run_collect phase_fail $(( $(date +%s) - t0 ))
+            die "/dev/ossim still absent after kexec into local kernel (now on $host_kernel)"
+        fi
+        log_to "  kexec OK; now on $host_kernel with /dev/ossim live"
+    fi
+
     # Reset ossim subsystem
     log_to "ossimctl: disable + enable"
     remote "$prefix/bin/ossimctl disable >/dev/null 2>&1; true"
@@ -629,19 +694,33 @@ chmod +x $inst_out/start_bench.sh"
 
         local logf="$RUN_DIR/logs/vm-$n.log"
         log_to "launching VM N=$n cpuset='$cpuset'"
-        # Launch in the background on the remote. Detach from the SSH
-        # session via setsid + nohup so the make/qemu process tree
-        # survives the SSH connection close.
+        # Background ssh locally rather than detaching the remote
+        # command. Tried remote nohup+setsid and `( cmd & )` subshells;
+        # both leak ssh's stdout/stderr fds to the backgrounded child
+        # and ssh blocks until the child exits. By keeping ssh in the
+        # foreground (relative to its own process) but backgrounding it
+        # on the local side, the SSH connection stays alive for the
+        # qemu's lifetime — and cleanup gets a free win: killing the
+        # local ssh sends SIGHUP through the channel, terminating the
+        # remote make+qemu naturally.
         ssh -n "$TARGET" "cd $remote_repo/workloads && \
             ${cpuset:+QEMU_CPUSET=$cpuset} \
-            nohup setsid make qemu-microbench-instance N=$n ${cpuset:+QEMU_CPUSET=$cpuset} \
-            </dev/null >>/tmp/qemu-microbench-$n.log 2>&1 &" \
-            2>>"$logf" || die "failed to launch VM N=$n"
+            make qemu-microbench-instance N=$n ${cpuset:+QEMU_CPUSET=$cpuset} \
+            >/tmp/qemu-microbench-$n.log 2>&1" \
+            </dev/null >>"$logf" 2>&1 &
+        local launch_ssh_pid=$!
+        CLEANUP_STATE[ssh_launch_pids]+="$launch_ssh_pid "
+        log_to "  vm-$n launched (local ssh pid=$launch_ssh_pid)"
         launch_pids+="$n "
     done
     CLEANUP_STATE[multi_vm_instances]="${instances[*]}"
 
-    # Wait for ready markers
+    # Wait for ready markers — guests now boot freely (no first-entry
+    # gate after the qemu sync-gate removal), autologin fires, the
+    # in-VM run_in_vm.sh writes /out/ready_vm-N and parks on the
+    # barrier. By the time every marker appears, pvclock is active on
+    # every vCPU thread, which is what the kernel's OSSIM_ENABLE_SYNC
+    # needs to resolve kvm_vcpu_handles.
     log_to "waiting for ready markers (timeout ${ready_timeout_s}s)"
     local deadline=$(( $(date +%s) + ready_timeout_s ))
     for n in "${instances[@]}"; do
@@ -657,8 +736,9 @@ chmod +x $inst_out/start_bench.sh"
         log_to "  vm-$n ready"
     done
 
-    # Enable sync (if requested) — this is the moment the ossim invariant
-    # turns on system-wide, before any guest bench has consumed the barrier.
+    # Enable sync now that every guest has reached the barrier. Single
+    # call, no retry needed — pvclock is active on every vCPU by the
+    # time the marker is written.
     if [[ "$ossim_sync" == "true" ]]; then
         log_to "ossimctl: enable-sync vtime_epoch=$vtime_epoch_ns"
         remote "$prefix/bin/ossimctl enable-sync $vtime_epoch_ns" \
@@ -732,9 +812,15 @@ cleanup() {
     # Only attempt the workload-side teardown if we actually started a run.
     if (( CLEANUP_STATE[run_started] == 1 )); then
         if (( ${CLEANUP_STATE[multi_vm_barrier_active]:-0} == 1 )); then
-            # multi_vm_barrier teardown: kill QEMU instances + flip ossim back.
+            # multi_vm_barrier teardown: kill local ssh launch processes
+            # first (sends SIGHUP through to remote make+qemu), then
+            # cover the rare straggler with a remote pkill, then flip
+            # ossim back.
             log_to "tearing down multi_vm_barrier instances"
             local prefix="/home/yiliangw/ossim.local/prefix"
+            for ssh_pid in ${CLEANUP_STATE[ssh_launch_pids]:-}; do
+                kill -TERM "$ssh_pid" 2>/dev/null || true
+            done
             if remote "pkill -TERM -f 'ossim-microbench-' 2>/dev/null; sleep 2; pkill -KILL -f 'ossim-microbench-' 2>/dev/null; true"; then
                 manifest_record_cleanup "stop_qemu" success "pkill ossim-microbench-*"
             else
@@ -769,7 +855,12 @@ cleanup() {
     final_class="$(jq -r '.current_classification // "phase_fail"' "$STATE_JSON" 2>/dev/null)"
     if (( exit_code == 0 )) && [[ "$final_class" != "success" ]]; then
         final_class="success"
-    elif (( exit_code != 0 )) && [[ "$final_class" == "success" ]]; then
+    elif (( exit_code != 0 )) && [[ "$final_class" != "phase_fail" \
+                                  && "$final_class" != "timeout" \
+                                  && "$final_class" != "cancelled" ]]; then
+        # Any non-zero exit with a non-terminal classification (success
+        # or in_progress) gets stamped as phase_fail — previously
+        # in_progress slipped through and confused downstream tools.
         final_class="phase_fail"
     fi
     manifest_finalize "$final_phase" "$final_class"
