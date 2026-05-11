@@ -1,0 +1,66 @@
+# exp_s1 experiment descriptor (Slice A: physical PHASE only)
+#
+# Drives workloads/scripts/experiments/exp_s1.sh PHASE=physical:
+# bare-metal cpu_loop microbenchmark with a host_bracket sidecar.
+# No VMs, no ossim involvement — exercises the run_exp.sh
+# infrastructure end-to-end (preflight, build/deploy, run/collect,
+# manifest, cleanup) without depending on barrier coordination or
+# vng reboots. Slice B will add the clean/perturbed VM phases.
+#
+# See clawspace/experiment-automation-design-draft-2026-05-11.md
+# for the runner contract this descriptor implements.
+
+schema_version: "1.0"
+name: exp_s1
+phase: physical
+
+# --- workload ---
+workload:
+  # The runner exports OSSIM_OUT_DIR to point inside the run dir, so
+  # exp_s1.sh's $EXP_OUT_BASE resolves under <run-dir>/work/.
+  command: bash workloads/scripts/experiments/exp_s1.sh
+  env:
+    PHASE: physical
+    TIME_S: "10"
+    SAMPLE_MS: "100"
+    INNER: "100000"
+  # Files (relative to the repo root) that contribute to workload
+  # provenance. The runner hashes each and records the hashes in
+  # manifest.json under workload_provenance.
+  provenance_files:
+    - workloads/scripts/experiments/exp_s1.sh
+    - workloads/scripts/experiments/common.sh
+    - workloads/host_microbench/bench_cpu.py
+    - workloads/host_microbench/host_bracket.py
+    - workloads/host_microbench/lib_results.py
+    - workloads/host_microbench/cpu_loop/cpu_loop    # binary
+    - workloads/host_microbench/cpu_loop/main.c      # source for repro
+
+# --- ossim semantics (none for physical phase) ---
+vcpu_count: 0
+vtime_epoch_ns: 0
+ossimctl_sequence: []        # no ossim involvement on physical
+kernel_knobs: {}
+
+# --- success criteria ---
+# Result JSON must exist, be non-empty, parse as JSON, and have:
+#   - top-level .benchmark == "cpu_loop"
+#   - .samples array is non-empty
+success_criteria:
+  result_glob: "work/workloads/exps/exp_s1/physical/cpu_host.json"
+  must_parse_json: true
+  benchmark_eq: cpu_loop
+  samples_min: 1
+
+# --- timing / timeout ---
+expected_runtime_sec: 30
+timeout_policy:
+  preflight_sec: 60
+  build_deploy_sec: 1800     # vng kernel from cold can take ~10min
+  run_collect_sec: 120
+
+# --- disconnect policy (Slice A is single-shot; no reboots expected) ---
+disconnect_policy:
+  preflight: { expected: false }
+  build_deploy: { expected: false }
+  run_collect: { expected: false }
