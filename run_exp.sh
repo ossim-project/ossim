@@ -177,7 +177,8 @@ manifest_init() {
     libossim_sha="$(git -C "$REPO_ROOT/libossim" rev-parse HEAD 2>/dev/null || echo unknown)"
     qemu_sha="$(git -C "$REPO_ROOT/qemu" rev-parse HEAD 2>/dev/null || echo unknown)"
 
-    jq -n --arg name "$EXP_NAME" --arg run_dir "$RUN_DIR" \
+    local run_id; run_id="$(basename "$RUN_DIR")"
+    jq -n --arg name "$EXP_NAME" --arg run_id "$run_id" --arg run_dir "$RUN_DIR" \
           --arg target "$TARGET" --arg start "$now" \
           --arg meta "$meta_sha" --arg k "$kernel_sha" \
           --arg l "$libossim_sha" --arg q "$qemu_sha" \
@@ -185,6 +186,7 @@ manifest_init() {
         '{
             schema_version: "1.0",
             experiment_name: $name,
+            run_id: $run_id,
             run_dir: $run_dir,
             target: $target,
             start_ts: $start,
