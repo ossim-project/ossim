@@ -6,10 +6,13 @@ Please check `docs/ossim.pdf` for an overview of the project's vision.
 
 Prerequisites:
 
-- X86 machine with **Ubuntu 25.10**
+- X86 machine
 - KVM is available
 - `sudo` is enabled for the current user
 
+**Notes:** The current codebase is developed and tested in Ubuntu 25.10.
+It is recommended to use the same Ubuntu version to work with the repo.
+However, Ubuntu >= 24.04 should be generally fine.
 
 Steps:
 
@@ -65,7 +68,7 @@ Build and install the kernel to the host system for full hardware testing:
 **Important:** The `configure-local-kernel` target uses `/boot/config-$(uname -r)` as the base configuration by default. If you are already booted into the Ossim kernel, this will use the previous Ossim kernel config instead of your original distro kernel config. To use a specific config file, override `LOCAL_KERNEL_CONFIG`:
 
 ```sh
-make LOCAL_KERNEL_CONFIG=/boot/config-6.11.0-26-generic configure-local-kernel
+make LOCAL_KERNEL_CONFIG=c<path to your kernel config> configure-local-kernel
 ```
 
 ```sh
@@ -180,9 +183,6 @@ make libossim
 # Install to $OSSIM_PREFIX
 make install-libossim
 
-# Run ossimd
-make run-ossimd
-
 # Use ossimctl
 ossimctl --help
 ```
@@ -200,7 +200,6 @@ make configure-qemu
 # Build and install QEMU to $OSSIM_PREFIX
 make install-qemu
 ```
-
 
 
 ## Run example workloads
