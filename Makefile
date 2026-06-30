@@ -6,14 +6,28 @@
 OSSIM_REMOTE_TARGET ?=
 OSSIM_REMOTE_DIR ?= $(CURDIR)
 OSSIM_REMOTE_MAKE_ARGS ?=
+OSSIM_REMOTE_RSYNC_ARGS ?= -azv --delete --filter=':- .gitignore'
 
 ifneq ($(filter remote-%,$(MAKECMDGOALS)),)
 
-remote-%:
+check-remote-vars:
 	@if [ -z "$(OSSIM_REMOTE_TARGET)" ]; then \
 		echo "Error: OSSIM_REMOTE_TARGET is not set (e.g. via OSSIM_REMOTE_TARGET=lab.host)"; \
 		exit 1; \
 	fi
+	@if [ -z "$(OSSIM_REMOTE_DIR)" ]; then \
+		echo "Error: OSSIM_REMOTE_DIR is not set"; \
+		exit 1; \
+	fi
+.PHONY: check-remote-vars
+
+remote-sync: check-remote-vars
+	@echo "Syncing local workspace to $(OSSIM_REMOTE_TARGET):$(OSSIM_REMOTE_DIR)..."
+	ssh $(OSSIM_REMOTE_TARGET) 'mkdir -p $(OSSIM_REMOTE_DIR)'
+	rsync $(OSSIM_REMOTE_RSYNC_ARGS) ./ $(OSSIM_REMOTE_TARGET):$(OSSIM_REMOTE_DIR)/
+.PHONY: remote-sync
+
+remote-%: remote-sync
 	@echo "Running 'make $*' on $(OSSIM_REMOTE_TARGET) over SSH..."; \
 	ssh -t $(OSSIM_REMOTE_TARGET) 'cd $(OSSIM_REMOTE_DIR) && make $* $(OSSIM_REMOTE_MAKE_ARGS)'
 .PHONY: remote-%
