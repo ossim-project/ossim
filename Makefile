@@ -7,6 +7,8 @@ OSSIM_REMOTE_TARGET ?=
 OSSIM_REMOTE_DIR ?= $(CURDIR)
 OSSIM_REMOTE_MAKE_ARGS ?=
 OSSIM_REMOTE_RSYNC_ARGS ?= -azv --delete --filter=':- .gitignore'
+OSSIM_REMOTE_SSH_ARGS ?=
+OSSIM_REMOTE_TTY_TARGETS ?= run-vng test-kernel ssh-vng
 
 ifneq ($(filter remote-%,$(MAKECMDGOALS)),)
 
@@ -29,7 +31,13 @@ remote-sync: check-remote-vars
 
 remote-%: remote-sync
 	@echo "Running 'make $*' on $(OSSIM_REMOTE_TARGET) over SSH..."; \
-	ssh -t $(OSSIM_REMOTE_TARGET) 'cd $(OSSIM_REMOTE_DIR) && make $* $(OSSIM_REMOTE_MAKE_ARGS)'
+	ssh_args="$(OSSIM_REMOTE_SSH_ARGS)"; \
+	if [ -z "$$ssh_args" ]; then \
+		case " $(OSSIM_REMOTE_TTY_TARGETS) " in \
+			*" $* "*) ssh_args="-t" ;; \
+		esac; \
+	fi; \
+	ssh $$ssh_args $(OSSIM_REMOTE_TARGET) 'cd $(OSSIM_REMOTE_DIR) && make $* $(OSSIM_REMOTE_MAKE_ARGS)'
 .PHONY: remote-%
 
 else  # local build — require ossim env vars and load build rules
