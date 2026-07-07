@@ -8,7 +8,7 @@ OSSIM_REMOTE_DIR ?= $(CURDIR)
 OSSIM_REMOTE_MAKE_ARGS ?=
 OSSIM_REMOTE_RSYNC_ARGS ?= -azv --delete --filter=':- .gitignore'
 OSSIM_REMOTE_SSH_ARGS ?=
-OSSIM_REMOTE_TTY_TARGETS ?= run-vng test-kernel ssh-vng
+OSSIM_REMOTE_TTY_TARGETS ?= run-vng run-vng-gdb run-vng-gdb-paused gdb-vng test-kernel ssh-vng
 
 ifneq ($(filter remote-%,$(MAKECMDGOALS)),)
 

@@ -12,7 +12,14 @@ VNG_CPUS ?= 8
 
 VNG ?= vng
 VNG_OPTS ?= --memory $(VNG_MEM) --cpus $(VNG_CPUS)
-VNG_RW ?= 0
+VNG_GDB_OPTS ?= --append nokaslr --qemu-opts='-s'
+VNG_GDB_PAUSED_OPTS ?= --append nokaslr --qemu-opts='-s -S'
+VNG_GDB_HOST ?= localhost
+VNG_GDB_PORT ?= 1234
+GDB ?= gdb
+VNG_RW ?= 1
+
+DEBUG ?= 0
 
 # Configure kernel from host config with disabled problematic options
 .PHONY: configure-local-kernel
@@ -46,6 +53,23 @@ configure-vng-kernel: clean-vng-kernel
 		--set-str CONFIG_LOCALVERSION "-ossim" \
 		--enable CONFIG_OSSIM \
 		--enable CONFIG_OSSIM_DEBUG
+ifeq ($(DEBUG),1)
+	@echo "Enabling VNG kernel debug info for gdb (DEBUG=1)"
+	$(kernel_d)/scripts/config \
+		--file $(vng_kernel_b)/.config \
+		--enable CONFIG_DEBUG_KERNEL \
+		--enable CONFIG_DEBUG_INFO \
+		--disable CONFIG_DEBUG_INFO_NONE \
+		--disable CONFIG_DEBUG_INFO_REDUCED \
+		--disable CONFIG_DEBUG_INFO_SPLIT \
+		--enable CONFIG_DEBUG_INFO_DWARF5 \
+		--enable CONFIG_DEBUG_INFO_COMPRESSED_NONE \
+		--enable CONFIG_GDB_SCRIPTS \
+		--enable CONFIG_FRAME_POINTER \
+		--enable CONFIG_KALLSYMS \
+		--enable CONFIG_KALLSYMS_ALL \
+		--disable CONFIG_RANDOMIZE_BASE
+endif
 	$(MAKE) -C $(kernel_d) O=$(abspath $(vng_kernel_b)) olddefconfig
 
 $(vng_kernel_b)/.config:
@@ -104,6 +128,30 @@ ifeq ($(VNG_RW),1)
 else
 	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS)
 endif
+
+# Boot kernel under virtme-ng with QEMU's gdbstub enabled.
+.PHONY: run-vng-gdb
+run-vng-gdb:
+ifeq ($(VNG_RW),1)
+	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS) $(VNG_GDB_OPTS)
+else
+	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS) $(VNG_GDB_OPTS)
+endif
+
+# Boot kernel under virtme-ng with QEMU's gdbstub and pause at reset.
+.PHONY: run-vng-gdb-paused
+run-vng-gdb-paused:
+ifeq ($(VNG_RW),1)
+	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS) $(VNG_GDB_PAUSED_OPTS)
+else
+	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS) $(VNG_GDB_PAUSED_OPTS)
+endif
+
+# Attach gdb to a virtme-ng/QEMU gdbstub started by run-vng-gdb.
+.PHONY: gdb-vng
+gdb-vng:
+	$(GDB) $(abspath $(vng_kernel_b))/vmlinux \
+		-ex "target remote $(VNG_GDB_HOST):$(VNG_GDB_PORT); continue"
 
 # Quick rebuild and test cycle
 .PHONY: test-kernel

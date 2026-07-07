@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Attach VNG kernel (:1234)",
+            "type": "cppdbg",
+            "request": "launch",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "miDebuggerServerAddress": "localhost:1234",
+            "program": "${env:OSSIM_BUILD_DIR}/kernel.vng/vmlinux",
+            "cwd": "${workspaceFolder}",
+            "stopAtConnect": false,
+            "externalConsole": false,
+            "setupCommands": [
+                {
+                    "description": "Disable pagination",
+                    "text": "set pagination off"
+                },
+                {
+                    "description": "Pretty-print structures",
+                    "text": "set print pretty on"
+                },
+                {
+                    "description": "Show next instruction when stopped",
+                    "text": "set disassemble-next-line on"
+                },
+                {
+                    "description": "Allow pending breakpoints before symbols are fully ready",
+                    "text": "set breakpoint pending on"
+                }
+            ]
+        }
+    ]
+}
