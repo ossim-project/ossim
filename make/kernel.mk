@@ -18,6 +18,7 @@ VNG_GDB_HOST ?= localhost
 VNG_GDB_PORT ?= 1234
 GDB ?= gdb
 VNG_RW ?= 1
+OSSIM_KGDB_BAUD ?= 115200
 
 DEBUG ?= 0
 
@@ -39,7 +40,19 @@ configure-local-kernel: clean-local-kernel
 		--file $(local_kernel_b)/.config \
 		--disable CONFIG_LOCALVERSION_AUTO \
 		--set-str CONFIG_LOCALVERSION "-ossim" \
+		--enable CONFIG_KVM \
+		--enable CONFIG_KVM_INTEL \
+		--enable CONFIG_KVM_AMD \
 		--enable CONFIG_OSSIM
+ifeq ($(DEBUG),1)
+	@echo "Enabling local kernel debug info for gdb (DEBUG=1)"
+	$(kernel_d)/scripts/config \
+		--file $(local_kernel_b)/.config \
+		--enable CONFIG_KGDB \
+		--enable CONFIG_KGDB_SERIAL_CONSOLE \
+		--enable CONFIG_DEBUG_INFO \
+		--disable CONFIG_STRICT_KERNEL_RWX
+endif
 	$(MAKE) -C $(kernel_d) O=$(abspath $(local_kernel_b)) olddefconfig
 
 # Configure kernel with virtme-ng defaults (minimal config for fast builds)
@@ -105,6 +118,53 @@ kexec-local-kernel:
 			--reuse-cmdline && \
 		echo "Switching to $$KREL via kexec..." && \
 		$(SUDO) systemctl kexec
+
+.PHONY: kexec-local-kernel-kgdb
+kexec-local-kernel-kgdb: rsync-local-vmlinux
+ifeq ($(strip $(OSSIM_TARGET_KGDB_PORT)),)
+	$(error OSSIM_TARGET_KGDB_PORT is not defined! Pass it like: make kexec-local-kernel-kgdb OSSIM_TARGET_KGDB_PORT=ttyS5)
+endif
+	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		CURRENT_CMDLINE=$$(cat /proc/cmdline | sed -e 's/kgdboc=[^ ]*//g' -e 's/kgdbwait//g') && \
+		echo "Loading kernel $$KREL via kexec (KGDB enabled over $(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD))..." && \
+		$(SUDO) kexec -l /boot/vmlinuz-$$KREL \
+			--initrd=/boot/initrd.img-$$KREL \
+			--append="$$CURRENT_CMDLINE console=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdboc=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdbwait" && \
+		echo "Switching to $$KREL via kexec..." && \
+		$(SUDO) systemctl kexec
+
+# Attach gdb to a kernel KGDB endpoint. For serial KGDB, OSSIM_KGDB_BAUD
+# must match the kernel kgdboc baud, e.g. kgdboc=ttyS4,115200.
+.PHONY: kgdb-kernel
+kgdb-kernel:
+ifeq ($(strip $(OSSIM_DEV_KGDB_VMLINUX)),)
+	$(error OSSIM_DEV_KGDB_VMLINUX is not defined! Pass it like: make kgdb-kernel OSSIM_DEV_KGDB_VMLINUX=/path/to/vmlinux)
+endif
+ifeq ($(strip $(OSSIM_DEV_KGDB_PORT)),)
+	$(error OSSIM_DEV_KGDB_PORT is not defined! Pass it like: make kgdb-kernel OSSIM_DEV_KGDB_PORT=ttyUSB0)
+endif
+	@DEV_PORT="$(OSSIM_DEV_KGDB_PORT)"; \
+	case "$$DEV_PORT" in /*|tcp:*) ;; *) DEV_PORT="/dev/$$DEV_PORT" ;; esac; \
+	$(GDB) "$(OSSIM_DEV_KGDB_VMLINUX)" \
+		-ex "set serial baud $(OSSIM_KGDB_BAUD)" \
+		-ex "target remote $$DEV_PORT"
+
+.PHONY: rsync-local-vmlinux
+rsync-local-vmlinux:
+ifeq ($(strip $(OSSIM_DEV_LOGIN)),)
+	$(error OSSIM_DEV_LOGIN is not defined! Pass it like: make rsync-local-vmlinux OSSIM_DEV_LOGIN=user@host)
+endif
+ifeq ($(strip $(OSSIM_DEV_KGDB_VMLINUX)),)
+	$(error OSSIM_DEV_KGDB_VMLINUX is not defined! Pass it like: make rsync-local-vmlinux OSSIM_DEV_KGDB_VMLINUX=/path/to/vmlinux)
+endif
+	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		VMLINUX_SRC="$(local_kernel_b)/vmlinux" && \
+		if [ ! -f "$$VMLINUX_SRC" ]; then \
+			echo "Error: $$VMLINUX_SRC not found! Please build the kernel first." >&2; \
+			exit 1; \
+		fi; \
+		echo "Syncing unstripped vmlinux ($$KREL) to $(OSSIM_DEV_LOGIN):$(OSSIM_DEV_KGDB_VMLINUX)..." && \
+		rsync -avz --progress "$$VMLINUX_SRC" "$(OSSIM_DEV_LOGIN):$(OSSIM_DEV_KGDB_VMLINUX)"
 
 .PHONY: vng-kernel
 vng-kernel: $(vng_kernel_b)/.config

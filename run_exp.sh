@@ -441,16 +441,16 @@ phase_build_deploy() {
             # ossimctl uses the just-built code. `install-local-kernel`
             # only refreshes /boot/vmlinuz-* + initrd (modules stay
             # stale to save time); pair with the kexec preflight gate.
-            targets=(remote-local-kernel remote-install-local-kernel \
-                     remote-install-libossim remote-install-qemu)
+            targets=(target-local-kernel target-install-local-kernel \
+                     target-install-libossim target-install-qemu)
             ;;
         *)
-            targets=(remote-install-libossim remote-install-qemu)
+            targets=(target-install-libossim target-install-qemu)
             ;;
     esac
 
     for tgt in "${targets[@]}"; do
-        log_to "running: make $tgt (OSSIM_REMOTE_TARGET=$TARGET)"
+        log_to "running: make $tgt (OSSIM_TARGET_LOGIN=$TARGET)"
         if ! make -C "$REPO_ROOT" "$tgt" >>"$logf" 2>&1; then
             log_to "make $tgt failed; tail -20 of $logf:"
             tail -20 "$logf" | tee -a "$RUNNER_LOG"
@@ -621,10 +621,10 @@ phase_run_collect_multi_vm_barrier() {
     if ! remote "[ -c /dev/ossim ]"; then
         log_to "  /dev/ossim absent on $host_kernel; invoking kexec to local ossim kernel"
         local kexec_t0; kexec_t0=$(date +%s)
-        # `make remote-kexec-local-kernel` runs `ssh -t lab '... && systemctl kexec'`;
+        # `make target-kexec-local-kernel` runs `ssh -t lab '... && systemctl kexec'`;
         # the ssh exits non-zero when the host kexecs out from under it.
         # We don't treat that exit as a failure — we verify by reconnect.
-        make -C "$REPO_ROOT" remote-kexec-local-kernel >>"$RUN_DIR/logs/kexec.log" 2>&1 || true
+        make -C "$REPO_ROOT" target-kexec-local-kernel >>"$RUN_DIR/logs/kexec.log" 2>&1 || true
         log_to "  kexec initiated; waiting for SSH on $TARGET to come back (cap 180s)"
         local kexec_deadline=$(( $(date +%s) + 180 ))
         local ssh_back=0
