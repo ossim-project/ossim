@@ -30,6 +30,44 @@
                     "text": "set breakpoint pending on"
                 }
             ]
+        },
+        {
+            "name": "Attach KGDB kernel ($OSSIM_DEV_KGDB_PORT)",
+            "type": "cppdbg",
+            "request": "launch",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "targetArchitecture": "x64",
+            "program": "${env:OSSIM_DEV_KGDB_VMLINUX}",
+            "cwd": "${workspaceFolder}",
+            "stopAtConnect": true,
+            "externalConsole": false,
+            "customLaunchSetupCommands": [
+                {
+                    "description": "Disable pagination",
+                    "text": "set pagination off"
+                },
+                {
+                    "description": "Pretty-print structures",
+                    "text": "set print pretty on"
+                },
+                {
+                    "description": "Show next instruction when stopped",
+                    "text": "set disassemble-next-line on"
+                },
+                {
+                    "description": "Allow pending breakpoints before symbols are fully ready",
+                    "text": "set breakpoint pending on"
+                },
+                {
+                    "description": "Set KGDB serial baudrate",
+                    "text": "set serial baud ${env:OSSIM_KGDB_BAUD}"
+                },
+                {
+                    "description": "Attach to KGDB serial device",
+                    "text": "target remote /dev/${env:OSSIM_DEV_KGDB_PORT}"
+                }
+            ]
         }
     ]
 }

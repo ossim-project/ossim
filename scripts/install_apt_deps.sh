@@ -13,6 +13,7 @@ KERNEL_DEPS=(
     dwarves
     lld
     virtme-ng
+    gdb
 )
 
 MISC_DEPS=(
