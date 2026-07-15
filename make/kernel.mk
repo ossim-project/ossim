@@ -3,14 +3,29 @@ HOST_KERNEL_CONFIG := /boot/config-$(shell uname -r)
 
 kernel_d := $(d)kernel
 
-local_kernel_b := $(b)kernel.local
-vng_kernel_b := $(b)kernel.vng
+DEBUG ?= 0
+
+local_kernel_normal_b := $(b)kernel.local
+local_kernel_debug_b := $(b)kernel.local.debug
+vng_kernel_normal_b := $(b)kernel.vng
+vng_kernel_debug_b := $(b)kernel.vng.debug
+
+ifeq ($(DEBUG),1)
+local_kernel_b := $(local_kernel_debug_b)
+vng_kernel_b := $(vng_kernel_debug_b)
+KERNEL_LOCALVERSION := -ossim.debug
+else
+local_kernel_b := $(local_kernel_normal_b)
+vng_kernel_b := $(vng_kernel_normal_b)
+KERNEL_LOCALVERSION := -ossim
+endif
 
 # virtme-ng configuration
 VNG_MEM ?= 8G
 VNG_CPUS ?= 8
 
 VNG ?= vng
+VNG_CONFIGKERNEL ?= virtme-configkernel
 VNG_OPTS ?= --memory $(VNG_MEM) --cpus $(VNG_CPUS)
 VNG_GDB_OPTS ?= --append nokaslr --qemu-opts='-s'
 VNG_GDB_PAUSED_OPTS ?= --append nokaslr --qemu-opts='-s -S'
@@ -20,7 +35,39 @@ GDB ?= gdb
 VNG_RW ?= 1
 OSSIM_KGDB_BAUD ?= 115200
 
-DEBUG ?= 0
+# KVM_OSSIM (the KVM vCPU integration) depends on VIRT_CPU_ACCOUNTING_GEN and
+# PARAVIRT_TIME_ACCOUNTING.  GEN is a choice member, so Kconfig will not
+# auto-select it; every config path must explicitly pick GEN and disable the
+# competing TICK choice.  PARAVIRT_TIME_ACCOUNTING makes get_vtime_delta()
+# subtract L0 steal from guest cputime, so vtime stays guest-execution-only
+# when the simulation host itself runs on a hypervisor (nested virt). Inert on
+# bare metal.
+KERNEL_CONFIG_OPTS := \
+	--disable CONFIG_LOCALVERSION_AUTO \
+	--set-str CONFIG_LOCALVERSION "$(KERNEL_LOCALVERSION)" \
+	--disable CONFIG_TICK_CPU_ACCOUNTING \
+	--enable CONFIG_VIRT_CPU_ACCOUNTING_GEN \
+	--enable CONFIG_PARAVIRT_TIME_ACCOUNTING \
+	--enable CONFIG_KVM \
+	--enable CONFIG_KVM_INTEL \
+	--enable CONFIG_KVM_AMD \
+	--enable CONFIG_OSSIM \
+	--enable CONFIG_KVM_OSSIM
+
+KERNEL_DEBUG_CONFIG_OPTS := \
+	--enable CONFIG_OSSIM_DEBUG \
+	--enable CONFIG_DEBUG_KERNEL \
+	--enable CONFIG_DEBUG_INFO \
+	--disable CONFIG_DEBUG_INFO_NONE \
+	--disable CONFIG_DEBUG_INFO_REDUCED \
+	--disable CONFIG_DEBUG_INFO_SPLIT \
+	--enable CONFIG_DEBUG_INFO_DWARF5 \
+	--enable CONFIG_DEBUG_INFO_COMPRESSED_NONE \
+	--enable CONFIG_GDB_SCRIPTS \
+	--enable CONFIG_FRAME_POINTER \
+	--enable CONFIG_KALLSYMS \
+	--enable CONFIG_KALLSYMS_ALL \
+	--disable CONFIG_RANDOMIZE_BASE
 
 # Configure kernel from host config with disabled problematic options
 .PHONY: configure-local-kernel
@@ -38,19 +85,14 @@ configure-local-kernel: clean-local-kernel
 		--set-str CONFIG_MODULE_SIG_KEY ""
 	$(kernel_d)/scripts/config \
 		--file $(local_kernel_b)/.config \
-		--disable CONFIG_LOCALVERSION_AUTO \
-		--set-str CONFIG_LOCALVERSION "-ossim" \
-		--enable CONFIG_KVM \
-		--enable CONFIG_KVM_INTEL \
-		--enable CONFIG_KVM_AMD \
-		--enable CONFIG_OSSIM
+		$(KERNEL_CONFIG_OPTS)
 ifeq ($(DEBUG),1)
 	@echo "Enabling local kernel debug info for gdb (DEBUG=1)"
 	$(kernel_d)/scripts/config \
 		--file $(local_kernel_b)/.config \
+		$(KERNEL_DEBUG_CONFIG_OPTS) \
 		--enable CONFIG_KGDB \
 		--enable CONFIG_KGDB_SERIAL_CONSOLE \
-		--enable CONFIG_DEBUG_INFO \
 		--disable CONFIG_STRICT_KERNEL_RWX
 endif
 	$(MAKE) -C $(kernel_d) O=$(abspath $(local_kernel_b)) olddefconfig
@@ -59,29 +101,17 @@ endif
 .PHONY: configure-vng-kernel
 configure-vng-kernel: clean-vng-kernel
 	@mkdir -p $(vng_kernel_b)
-	cd $(kernel_d) && $(VNG) --kconfig O=$(abspath $(vng_kernel_b))
+	cd $(kernel_d) && KBUILD_OUTPUT=$(abspath $(vng_kernel_b)) \
+		$(VNG_CONFIGKERNEL) --defconfig O=$(abspath $(vng_kernel_b))
 	$(kernel_d)/scripts/config \
 		--file $(vng_kernel_b)/.config \
-		--disable CONFIG_LOCALVERSION_AUTO \
-		--set-str CONFIG_LOCALVERSION "-ossim" \
-		--enable CONFIG_OSSIM \
+		$(KERNEL_CONFIG_OPTS) \
 		--enable CONFIG_OSSIM_DEBUG
 ifeq ($(DEBUG),1)
 	@echo "Enabling VNG kernel debug info for gdb (DEBUG=1)"
 	$(kernel_d)/scripts/config \
 		--file $(vng_kernel_b)/.config \
-		--enable CONFIG_DEBUG_KERNEL \
-		--enable CONFIG_DEBUG_INFO \
-		--disable CONFIG_DEBUG_INFO_NONE \
-		--disable CONFIG_DEBUG_INFO_REDUCED \
-		--disable CONFIG_DEBUG_INFO_SPLIT \
-		--enable CONFIG_DEBUG_INFO_DWARF5 \
-		--enable CONFIG_DEBUG_INFO_COMPRESSED_NONE \
-		--enable CONFIG_GDB_SCRIPTS \
-		--enable CONFIG_FRAME_POINTER \
-		--enable CONFIG_KALLSYMS \
-		--enable CONFIG_KALLSYMS_ALL \
-		--disable CONFIG_RANDOMIZE_BASE
+		$(KERNEL_DEBUG_CONFIG_OPTS)
 endif
 	$(MAKE) -C $(kernel_d) O=$(abspath $(vng_kernel_b)) olddefconfig
 
@@ -323,4 +353,3 @@ vng-log:
 .PHONY: watch-dmesg
 watch-dmesg:
 	watch -n 1 "sudo dmesg | tail -20"
-	
