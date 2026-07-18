@@ -22,6 +22,13 @@
 #   OSSIM_DEV_KGDB_VMLINUX       Dev-side unstripped vmlinux path for GDB.
 #   OSSIM_KGDB_BAUD              KGDB serial baudrate; must match target kgdboc baud.
 #
+# Kexec variables:
+#   OSSIM_KEXEC_DEFAULT_KERNEL          Installed kernel release for kexec-default-kernel.
+#   OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE  Command line for kexec-default-kernel.
+#   OSSIM_KEXEC_KERNEL_CMDLINE          Command line for kexec-local-kernel; usually
+#                                      $(OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE) plus
+#                                      OSSIM-specific args such as ossim_cpus=.
+#
 # Target dispatch: `make target-<goal>` runs <goal> on $(OSSIM_TARGET_LOGIN)
 # over SSH. Set OSSIM_TARGET_SYNC=1 to rsync this workspace to
 # $(OSSIM_TARGET_LOGIN):$(OSSIM_TARGET_DIR) before running the target. When

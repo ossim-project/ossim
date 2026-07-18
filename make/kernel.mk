@@ -23,16 +23,21 @@ endif
 # virtme-ng configuration
 VNG_MEM ?= 8G
 VNG_CPUS ?= 8
-
 VNG ?= vng
 VNG_CONFIGKERNEL ?= virtme-configkernel
-VNG_OPTS ?= --memory $(VNG_MEM) --cpus $(VNG_CPUS)
+
+VNG_RW ?= 1
+VNG_KERNEL_CMDLINE_APPEND += ossim_cpus=4-7
+VNG_KERNEL_CMDLINE_APPEND_OPT = $(if $(strip $(VNG_KERNEL_CMDLINE_APPEND)),--append "$(VNG_KERNEL_CMDLINE_APPEND)")
+
+VNG_OPTS ?= $(if $(filter 1,$(VNG_RW)),--rw) --memory $(VNG_MEM) --cpus $(VNG_CPUS) \
+	$(VNG_KERNEL_CMDLINE_APPEND_OPT)
+
+GDB ?= gdb
 VNG_GDB_OPTS ?= --append nokaslr --qemu-opts='-s'
 VNG_GDB_PAUSED_OPTS ?= --append nokaslr --qemu-opts='-s -S'
 VNG_GDB_HOST ?= localhost
 VNG_GDB_PORT ?= 1234
-GDB ?= gdb
-VNG_RW ?= 1
 OSSIM_KGDB_BAUD ?= 115200
 
 # KVM_OSSIM (the KVM vCPU integration) depends on VIRT_CPU_ACCOUNTING_GEN and
@@ -141,27 +146,47 @@ install-local-kernel-all: local-kernel install-local-kernel-modules install-loca
 # Boot the installed local kernel via kexec
 .PHONY: kexec-local-kernel
 kexec-local-kernel:
-	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
-		echo "Loading kernel $$KREL via kexec..." && \
-		$(SUDO) kexec -l /boot/vmlinuz-$$KREL \
-			--initrd=/boot/initrd.img-$$KREL \
-			--reuse-cmdline && \
-		echo "Switching to $$KREL via kexec..." && \
-		$(SUDO) systemctl kexec
+	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		$(MAKE) KERNEL_RELEASE="$$KERNEL_RELEASE" \
+			KERNEL_CMDLINE="$(OSSIM_KEXEC_KERNEL_CMDLINE)" \
+			kexec-kernel
+
+.PHONY: kexec-default-kernel
+kexec-default-kernel:
+	$(MAKE) KERNEL_RELEASE="$(OSSIM_KEXEC_DEFAULT_KERNEL)" \
+		KERNEL_CMDLINE="$(OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE)" \
+		kexec-kernel
+
+.PHONY: kexec-kernel
+kexec-kernel:
+	@if [ -z "$(KERNEL_RELEASE)" ]; then \
+		echo "Error: KERNEL_RELEASE is not set. Aborted."; \
+		exit 1; \
+	fi; \
+	if [ -n "$(KERNEL_CMDLINE)" ]; then \
+		set -- --append "$(KERNEL_CMDLINE)"; \
+	else \
+		set -- --reuse-cmdline; \
+	fi; \
+	echo "Loading kernel $(KERNEL_RELEASE) via kexec..." && \
+	$(SUDO) kexec -l /boot/vmlinuz-$(KERNEL_RELEASE) \
+		--initrd=/boot/initrd.img-$(KERNEL_RELEASE) \
+		"$$@" && \
+	echo "Switching to $(KERNEL_RELEASE) via kexec..." && \
+	$(SUDO) systemctl kexec
 
 .PHONY: kexec-local-kernel-kgdb
 kexec-local-kernel-kgdb: rsync-local-vmlinux
 ifeq ($(strip $(OSSIM_TARGET_KGDB_PORT)),)
 	$(error OSSIM_TARGET_KGDB_PORT is not defined! Pass it like: make kexec-local-kernel-kgdb OSSIM_TARGET_KGDB_PORT=ttyS5)
 endif
-	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
-		CURRENT_CMDLINE=$$(cat /proc/cmdline | sed -e 's/kgdboc=[^ ]*//g' -e 's/kgdbwait//g') && \
-		echo "Loading kernel $$KREL via kexec (KGDB enabled over $(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD))..." && \
-		$(SUDO) kexec -l /boot/vmlinuz-$$KREL \
-			--initrd=/boot/initrd.img-$$KREL \
-			--append="$$CURRENT_CMDLINE console=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdboc=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdbwait" && \
-		echo "Switching to $$KREL via kexec..." && \
-		$(SUDO) systemctl kexec
+	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		$(MAKE) KERNEL_RELEASE="$$KERNEL_RELEASE" \
+			KERNEL_CMDLINE="$(OSSIM_KEXEC_KERNEL_CMDLINE) console=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdboc=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdbwait" \
+			kexec-kernel
+
+.PHONY: kexec-local-kernel-gdb
+kexec-local-kernel-gdb: kexec-local-kernel-kgdb
 
 # Attach gdb to a kernel KGDB endpoint. For serial KGDB, OSSIM_KGDB_BAUD
 # must match the kernel kgdboc baud, e.g. kgdboc=ttyS4,115200.
@@ -187,13 +212,13 @@ endif
 ifeq ($(strip $(OSSIM_DEV_KGDB_VMLINUX)),)
 	$(error OSSIM_DEV_KGDB_VMLINUX is not defined! Pass it like: make rsync-local-vmlinux OSSIM_DEV_KGDB_VMLINUX=/path/to/vmlinux)
 endif
-	@KREL=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
 		VMLINUX_SRC="$(local_kernel_b)/vmlinux" && \
 		if [ ! -f "$$VMLINUX_SRC" ]; then \
 			echo "Error: $$VMLINUX_SRC not found! Please build the kernel first." >&2; \
 			exit 1; \
 		fi; \
-		echo "Syncing unstripped vmlinux ($$KREL) to $(OSSIM_DEV_LOGIN):$(OSSIM_DEV_KGDB_VMLINUX)..." && \
+		echo "Syncing unstripped vmlinux ($$KERNEL_RELEASE) to $(OSSIM_DEV_LOGIN):$(OSSIM_DEV_KGDB_VMLINUX)..." && \
 		rsync -avz --progress "$$VMLINUX_SRC" "$(OSSIM_DEV_LOGIN):$(OSSIM_DEV_KGDB_VMLINUX)"
 
 .PHONY: vng-kernel
@@ -213,29 +238,17 @@ clean-vng-kernel:
 # Boot kernel with virtme-ng using host filesystem (read-only by default)
 .PHONY: run-vng
 run-vng:
-ifeq ($(VNG_RW),1)
-	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS)
-else
 	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS)
-endif
 
 # Boot kernel under virtme-ng with QEMU's gdbstub enabled.
 .PHONY: run-vng-gdb
 run-vng-gdb:
-ifeq ($(VNG_RW),1)
-	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS) $(VNG_GDB_OPTS)
-else
 	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS) $(VNG_GDB_OPTS)
-endif
 
 # Boot kernel under virtme-ng with QEMU's gdbstub and pause at reset.
 .PHONY: run-vng-gdb-paused
 run-vng-gdb-paused:
-ifeq ($(VNG_RW),1)
-	$(VNG) --run $(abspath $(vng_kernel_b)) --rw $(VNG_OPTS) $(VNG_GDB_PAUSED_OPTS)
-else
 	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS) $(VNG_GDB_PAUSED_OPTS)
-endif
 
 # Attach gdb to a virtme-ng/QEMU gdbstub started by run-vng-gdb.
 .PHONY: gdb-vng
@@ -262,7 +275,7 @@ start-vng:
 		echo "Use 'make ssh-vng' to connect or 'make stop-vng' to stop"; \
 	else \
 		echo "Starting vng with SSH via TCP (port=$(VNG_SSH_PORT))..."; \
-		nohup $(VNG) --run $(abspath $(vng_kernel_b)) --rw \
+		nohup $(VNG) --run $(abspath $(vng_kernel_b)) \
 			--ssh $(VNG_SSH_PORT) --ssh-tcp $(VNG_OPTS) \
 			> $(VNG_LOG) 2>&1 & \
 		echo $$! > $(VNG_PIDFILE); \
@@ -296,7 +309,7 @@ ssh-vng:
 # Usage: make vng-exec VNG_CMD="uname -a"
 .PHONY: exec-vng
 exec-vng:
-	$(VNG) --run $(abspath $(vng_kernel_b)) --rw --exec "$(VNG_CMD)"
+	$(VNG) --run $(abspath $(vng_kernel_b)) $(VNG_OPTS) --exec "$(VNG_CMD)"
 
 # Stop the running vng instance
 .PHONY: stop-vng
