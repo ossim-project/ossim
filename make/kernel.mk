@@ -1,5 +1,6 @@
 # kernel.mk - Build and test custom kernel with virtme-ng
 HOST_KERNEL_CONFIG := /boot/config-$(shell uname -r)
+BOOT_DIR := /boot
 
 kernel_d := $(d)kernel
 
@@ -40,6 +41,20 @@ VNG_GDB_HOST ?= localhost
 VNG_GDB_PORT ?= 1234
 OSSIM_KGDB_BAUD ?= 115200
 
+# tracefs utilities for OSSIM/KVM timer and scheduler diagnostics.
+# Override OSSIM_TRACEFS for systems that mount tracefs elsewhere, and override
+# OSSIM_TRACEPOINTS with a whitespace-separated list of subsystem:event names.
+OSSIM_TRACEFS ?= /sys/kernel/tracing
+OSSIM_TRACEPOINTS ?= \
+	ossim:ossim_idle_jump \
+	ossim:ossim_vtime_forward \
+	ossim:ossim_lapic_timer_cancel \
+	ossim:ossim_lapic_timer_reset \
+	ossim:ossim_lapic_timer_due \
+	ossim:ossim_lapic_timer_expire \
+	ossim:ossim_sched_vtime_refresh \
+	ossim:ossim_sched_rq
+
 # KVM_OSSIM (the KVM vCPU integration) depends on VIRT_CPU_ACCOUNTING_GEN and
 # PARAVIRT_TIME_ACCOUNTING.  GEN is a choice member, so Kconfig will not
 # auto-select it; every config path must explicitly pick GEN and disable the
@@ -53,14 +68,16 @@ KERNEL_CONFIG_OPTS := \
 	--disable CONFIG_TICK_CPU_ACCOUNTING \
 	--enable CONFIG_VIRT_CPU_ACCOUNTING_GEN \
 	--enable CONFIG_PARAVIRT_TIME_ACCOUNTING \
+	--enable CONFIG_OSSIM \
 	--enable CONFIG_KVM \
 	--enable CONFIG_KVM_INTEL \
 	--enable CONFIG_KVM_AMD \
-	--enable CONFIG_OSSIM \
 	--enable CONFIG_KVM_OSSIM
 
 KERNEL_DEBUG_CONFIG_OPTS := \
 	--enable CONFIG_OSSIM_DEBUG \
+	--enable CONFIG_KUNIT \
+	--enable CONFIG_OSSIM_KUNIT_TEST \
 	--enable CONFIG_DEBUG_KERNEL \
 	--enable CONFIG_DEBUG_INFO \
 	--disable CONFIG_DEBUG_INFO_NONE \
@@ -110,8 +127,7 @@ configure-vng-kernel: clean-vng-kernel
 		$(VNG_CONFIGKERNEL) --defconfig O=$(abspath $(vng_kernel_b))
 	$(kernel_d)/scripts/config \
 		--file $(vng_kernel_b)/.config \
-		$(KERNEL_CONFIG_OPTS) \
-		--enable CONFIG_OSSIM_DEBUG
+		$(KERNEL_CONFIG_OPTS)
 ifeq ($(DEBUG),1)
 	@echo "Enabling VNG kernel debug info for gdb (DEBUG=1)"
 	$(kernel_d)/scripts/config \
@@ -129,19 +145,22 @@ $(local_kernel_b)/.config:
 # Build kernel
 .PHONY: local-kernel
 local-kernel: $(local_kernel_b)/.config
+	$(MAKE) LD=ld.lld -C $(local_kernel_b) -j$(JOBS) bzImage
+
+.PHONY: local-kernel-all
+local-kernel-all: $(local_kernel_b)/.config
 	$(MAKE) LD=ld.lld -C $(local_kernel_b) -j$(JOBS)
 	$(MAKE) LD=ld.lld -C $(local_kernel_b) modules -j$(JOBS)
 
-.PHONY: install-local-kernel-modules
-install-local-kernel-modules:
-	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install
-
 .PHONY: install-local-kernel
-install-local-kernel:
-	$(SUDO) $(MAKE) -C $(local_kernel_b) install
+install-local-kernel: local-kernel
+	KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+		sudo install -m 0644 $(local_kernel_b)/arch/x86/boot/bzImage "$(BOOT_DIR)/vmlinuz-$$KERNEL_RELEASE"
 
 .PHONY: install-local-kernel-all
-install-local-kernel-all: local-kernel install-local-kernel-modules install-local-kernel
+install-local-kernel-all: local-kernel-all
+	$(SUDO) $(MAKE) -C $(local_kernel_b) modules_install install
+
 
 # Boot the installed local kernel via kexec
 .PHONY: kexec-local-kernel
@@ -366,3 +385,55 @@ vng-log:
 .PHONY: watch-dmesg
 watch-dmesg:
 	watch -n 1 "sudo dmesg | tail -20"
+
+# Clear the trace buffer, enable OSSIM_TRACEPOINTS, and start tracing. Validate
+# every event before changing tracefs so a typo cannot leave a partial setup.
+.PHONY: start-kernel-trace
+start-kernel-trace:
+	@TRACEFS="$(OSSIM_TRACEFS)"; \
+	if [ ! -d "$$TRACEFS" ]; then \
+		echo "Error: tracefs not found at $$TRACEFS. Set OSSIM_TRACEFS to its mount point." >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$(strip $(OSSIM_TRACEPOINTS))" ]; then \
+		echo "Error: OSSIM_TRACEPOINTS is empty." >&2; \
+		exit 1; \
+	fi; \
+	for event in $(OSSIM_TRACEPOINTS); do \
+		if ! $(SUDO) grep -qx "$$event" "$$TRACEFS/available_events"; then \
+			echo "Error: tracepoint '$$event' is not available." >&2; \
+			exit 1; \
+		fi; \
+	done; \
+	printf '0\n' | $(SUDO) tee "$$TRACEFS/tracing_on" >/dev/null; \
+	printf '\n' | $(SUDO) tee "$$TRACEFS/set_event" >/dev/null; \
+	printf '\n' | $(SUDO) tee "$$TRACEFS/trace" >/dev/null; \
+	for event in $(OSSIM_TRACEPOINTS); do \
+		printf '%s\n' "$$event" | $(SUDO) tee -a "$$TRACEFS/set_event" >/dev/null; \
+	done; \
+	printf '1\n' | $(SUDO) tee "$$TRACEFS/tracing_on" >/dev/null; \
+	echo "Tracing enabled at $$TRACEFS:"; \
+	for event in $(OSSIM_TRACEPOINTS); do echo "  $$event"; done
+
+# Stop tracing and disable all tracepoint events. The captured trace remains in
+# the buffer and can be inspected with `make view-trace`.
+.PHONY: stop-kernel-trace
+stop-kernel-trace:
+	@TRACEFS="$(OSSIM_TRACEFS)"; \
+	if [ ! -d "$$TRACEFS" ]; then \
+		echo "Error: tracefs not found at $$TRACEFS. Set OSSIM_TRACEFS to its mount point." >&2; \
+		exit 1; \
+	fi; \
+	printf '0\n' | $(SUDO) tee "$$TRACEFS/tracing_on" >/dev/null; \
+	printf '\n' | $(SUDO) tee "$$TRACEFS/set_event" >/dev/null; \
+	echo "Tracing disabled; captured data remains in $$TRACEFS/trace."
+
+# Print the current trace snapshot. Disable tracing first for a stable capture.
+.PHONY: print-kernel-trace
+print-kernel-trace:
+	@TRACEFS="$(OSSIM_TRACEFS)"; \
+	if [ ! -e "$$TRACEFS/trace" ]; then \
+		echo "Error: trace not found at $$TRACEFS/trace. Set OSSIM_TRACEFS to its mount point." >&2; \
+		exit 1; \
+	fi; \
+	$(SUDO) cat "$$TRACEFS/trace"

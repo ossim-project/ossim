@@ -36,7 +36,7 @@ Steps:
 
     ```sh
     bash scripts/install_apt_deps.sh
-    bash scripts/intall_grpc.sh
+    bash scripts/install_grpc.sh
     ```
 
     This may take more than 10 minutes because it builds some dependencies (e.g., gRPC) from source.
@@ -68,7 +68,7 @@ Build and install the kernel to the host system for full hardware testing:
 **Important:** The `configure-local-kernel` target uses `/boot/config-$(uname -r)` as the base configuration by default. If you are already booted into the Ossim kernel, this will use the previous Ossim kernel config instead of your original distro kernel config. To use a specific config file, override `LOCAL_KERNEL_CONFIG`:
 
 ```sh
-make LOCAL_KERNEL_CONFIG=c<path to your kernel config> configure-local-kernel
+make LOCAL_KERNEL_CONFIG=<path to your kernel config> configure-local-kernel
 ```
 
 ```sh
@@ -80,7 +80,29 @@ make local-kernel
 
 # Install kernel to the host system
 make install-local-kernel
+
+# Or build, install modules, and install the kernel in one step
+make install-local-kernel-all
 ```
+
+### Switching Kernels with kexec
+
+After installing a local Ossim kernel, you can switch to it without going
+through GRUB:
+
+```sh
+# Switch to the locally built/installed Ossim kernel
+make OSSIM_KEXEC_KERNEL_CMDLINE="ossim_cpus=4-7" kexec-local-kernel
+
+# Switch back to an installed distro/default kernel
+make \
+  OSSIM_KEXEC_DEFAULT_KERNEL="<kernel-release>" \
+  OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE="<kernel-command-line>" \
+  kexec-default-kernel
+```
+
+If the command-line variable is omitted, the kexec helper reuses the current
+kernel command line.
 
 #### Prevent Ossim Kernel from Becoming Default
 
@@ -132,19 +154,35 @@ make vng-kernel
 make run-vng
 ```
 
-#### Persistent vng Instance for Development
-
-For continuous development and testing, run a persistent vng instance with SSH access via vsock:
+By default, VNG boots with 8 vCPUs, 8 GiB of memory, a writable host filesystem,
+and `ossim_cpus=4-7` appended to the kernel command line. Override these with
+`VNG_CPUS`, `VNG_MEM`, `VNG_RW`, and `VNG_KERNEL_CMDLINE_APPEND`:
 
 ```sh
-# Start persistent vng instance with SSH via vsock (default CID 2025)
+make VNG_CPUS=4 VNG_MEM=4G VNG_KERNEL_CMDLINE_APPEND="ossim_cpus=2-3" run-vng
+```
+
+For kernel debugging, use the QEMU gdbstub targets:
+
+```sh
+# Start with the gdbstub on localhost:1234
+make DEBUG=1 run-vng-gdb
+
+# Start paused at reset, then attach gdb separately
+make DEBUG=1 run-vng-gdb-paused
+make DEBUG=1 gdb-vng
+```
+
+#### Persistent vng Instance for Development
+
+For continuous development and testing, run a persistent vng instance with SSH access via TCP:
+
+```sh
+# Start persistent vng instance with SSH via TCP (default port 12222)
 make start-vng
 
 # Check status
 make vng-status
-
-# Run commands via SSH
-make VNG_CMD="uname -r" run-vng
 
 # Interactive SSH session
 make ssh-vng
@@ -163,6 +201,27 @@ For one-off commands without persistent state, use `exec-vng`:
 
 ```sh
 make VNG_CMD="dmesg | tail" exec-vng
+```
+
+### Running make targets on a remote/lab host
+
+Any local make target can be dispatched to a target host as `target-<goal>`.
+This is useful for builds and kernel installs that should run on a lab machine
+instead of the development host:
+
+```sh
+export OSSIM_TARGET_LOGIN=<user@host>
+export OSSIM_TARGET_DIR=<repo-path-on-target>
+export OSSIM_TARGET_SYNC=1   # set to 0 if the target tree is already up to date
+
+# Configure/build/install on the target host
+make target-configure-vng-kernel
+make target-vng-kernel
+make target-install-libossim
+make target-install-qemu
+
+# Switch the target host to the installed local Ossim kernel
+make target-kexec-local-kernel OSSIM_KEXEC_KERNEL_CMDLINE="ossim_cpus=4-7"
 ```
 
 ## libossim

@@ -29,6 +29,11 @@
 #                                      $(OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE) plus
 #                                      OSSIM-specific args such as ossim_cpus=.
 #
+# Kernel trace variables:
+#   OSSIM_TRACEPOINTS             Whitespace-separated subsystem:event list enabled
+#                                 by start-kernl-trace.
+#   OSSIM_TRACEFS                 tracefs mount point; defaults to /sys/kernel/tracing.
+#
 # Target dispatch: `make target-<goal>` runs <goal> on $(OSSIM_TARGET_LOGIN)
 # over SSH. Set OSSIM_TARGET_SYNC=1 to rsync this workspace to
 # $(OSSIM_TARGET_LOGIN):$(OSSIM_TARGET_DIR) before running the target. When
