@@ -1,57 +1,122 @@
-# Ossim: OS-Level Support for Fast End-to-End Compute Cluster Evaluation
+# Ossim: OS-Driven Live Simulation for Cluster-Scale Full-Stack Evaluation
 
-Please check `docs/ossim.pdf` for an overview of the project's vision. 
+Ossim is an OS-level approach to cluster-scale full-stack simulation built on
+the Linux virtualization stack. It combines full-stack fidelity for unmodified
+production software with the simulation performance needed for iterative
+configuration exploration.
 
-## Set Up
+Ossim coordinates live and modeled components under shared simulated time while
+controlling interference among co-located live hosts. Its design comprises four
+subsystems:
 
-Prerequisites:
+- **Simulation-oriented scheduling** coordinates live and modeled components
+  under shared virtual time.
+- **Live memory hierarchy management** controls interference among co-located
+  live components.
+- **Simulation-aware IPC** delivers cross-component events under virtual time.
+- **Distributed simulation orchestration** composes the per-host mechanisms
+  across machines for cluster-scale simulation.
 
-- X86 machine
-- KVM is available
-- `sudo` is enabled for the current user
+Together, these mechanisms explore *simulation-native OS support*, where
+simulation control and orchestration become core operating-system
+responsibilities.
 
-**Notes:** The current codebase is developed and tested in Ubuntu 25.10.
-It is recommended to use the same Ubuntu version to work with the repo.
-However, Ubuntu >= 24.04 should be generally fine.
+## Setup
 
-Steps:
+### Supported host
 
-1. Configure the following environment variables:
+The current development and test environment is:
 
-    - `OSSIM_PREFIX`: The install directory (e.g., `/usr/local/ossim/`)
-    - `OSSIM_BUILD_DIR`: The build directory, (e.g., `./build/`)
-    - `OSSIM_OUT_DIR`: The output directory, (e.g, `./out/`)
+- Ubuntu 26.04 LTS
+- x86-64 with hardware virtualization enabled and `/dev/kvm` available
+- a user account that can run `sudo`
 
-    Also update environment variables to include the `OSSIM_PREFIX`:
-    ```sh
-    export PATH=${OSSIM_PREFIX}/bin${PATH:+:$PATH}
-    export LD_LIBRARY_PATH=${OSSIM_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-    export LIBRARY_PATH=${OSSIM_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
-    export CPATH=${OSSIM_PREFIX}/include${CPATH:+:$CPATH}
-    export PKG_CONFIG_PATH=${OSSIM_PREFIX}/lib/pkgconfig:${OSSIM_PREFIX}/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
-    export CMAKE_PREFIX_PATH=${OSSIM_PREFIX}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}
-    ```
+Other Linux distributions and Ubuntu releases may work, but are not currently
+tested.
 
-2. Install dependencies:
+### Quick start: kernel smoke test
 
-    ```sh
-    bash scripts/install_apt_deps.sh
-    bash scripts/install_grpc.sh
-    ```
+The shortest test path builds the Ossim kernel and boots it with virtme-ng. It
+does not install a kernel on the host or build the full QEMU/libossim stack.
 
-    This may take more than 10 minutes because it builds some dependencies (e.g., gRPC) from source.
+Install the system dependencies and grant the current user KVM access:
 
-    Optionally, you can configure `GRPC_CXXFLAGS` and `GRPC_LDFLAGS` environment variables (e.g., also in `/etc/profile.d/ossim.sh`) to save build time (it takes some time `pkg-config` to work with gRPC).
-    You can initialize the variables by copying the output from `pkg-config --cflags grpc++ protobuf` and `pkg-config --libs grpc++ protobuf` respectively.
+```sh
+bash scripts/install_apt_deps.sh
+sudo adduser "$USER" kvm
+```
 
-3. Add the current user to related groups and relogin:
+Log out and back in after changing group membership. Then, from the repository
+root, choose writable locations for the install, build, and output trees. These
+generic values are suitable for a disposable local build and may be changed:
 
-    ```sh
-    sudo adduser $USER kvm
-    ```
+```sh
+export OSSIM_PREFIX="${OSSIM_PREFIX:-$HOME/.local/ossim}"
+export OSSIM_BUILD_DIR="${OSSIM_BUILD_DIR:-$PWD/build}"
+export OSSIM_OUT_DIR="${OSSIM_OUT_DIR:-$PWD/out}"
 
-    You may want to re-login for the configuration to take effect.
+export PATH="$OSSIM_PREFIX/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$OSSIM_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$OSSIM_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export CPATH="$OSSIM_PREFIX/include${CPATH:+:$CPATH}"
+export PKG_CONFIG_PATH="$OSSIM_PREFIX/lib/pkgconfig:$OSSIM_PREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export CMAKE_PREFIX_PATH="$OSSIM_PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 
+git submodule update --init --recursive --depth 1 kernel
+make configure-vng-kernel
+make vng-kernel
+make VNG_CMD="uname -r" exec-vng
+```
+
+The final command boots the freshly built kernel, prints its release, and exits.
+The release should contain `-ossim`.
+
+### Environment
+
+The local build requires the following environment variables. Set each one to a
+path appropriate for your system:
+
+- `OSSIM_PREFIX`: installation prefix for Ossim binaries, libraries, and headers
+- `OSSIM_BUILD_DIR`: out-of-tree build directory
+- `OSSIM_OUT_DIR`: output and install-staging directory
+
+Add the installation prefix to the relevant search paths:
+
+```sh
+export PATH="$OSSIM_PREFIX/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$OSSIM_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$OSSIM_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export CPATH="$OSSIM_PREFIX/include${CPATH:+:$CPATH}"
+export PKG_CONFIG_PATH="$OSSIM_PREFIX/lib/pkgconfig:$OSSIM_PREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export CMAKE_PREFIX_PATH="$OSSIM_PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+```
+
+See [`docs/environment.md`](docs/environment.md) for the complete configuration reference.
+
+### Dependencies
+
+Install the Ubuntu packages used by the kernel, QEMU, libossim, and development
+tools:
+
+```sh
+bash scripts/install_apt_deps.sh
+```
+
+### KVM access
+
+Add the current user to the `kvm` group, then log out and back in so the new
+group membership takes effect:
+
+```sh
+sudo adduser "$USER" kvm
+```
+
+Verify the host setup after logging back in:
+
+```sh
+test -r /dev/kvm && test -w /dev/kvm
+vng --version
+```
 
 ## Ossim Kernel
 
@@ -65,10 +130,10 @@ git submodule update --init --recursive --depth 1 kernel
 
 Build and install the kernel to the host system for full hardware testing:
 
-**Important:** The `configure-local-kernel` target uses `/boot/config-$(uname -r)` as the base configuration by default. If you are already booted into the Ossim kernel, this will use the previous Ossim kernel config instead of your original distro kernel config. To use a specific config file, override `LOCAL_KERNEL_CONFIG`:
+**Important:** The `configure-local-kernel` target uses `/boot/config-$(uname -r)` as the base configuration by default. If you are already booted into the Ossim kernel, this will use the previous Ossim kernel config instead of your original distro kernel config. To use a specific config file, override `HOST_KERNEL_CONFIG`:
 
 ```sh
-make LOCAL_KERNEL_CONFIG=<path to your kernel config> configure-local-kernel
+make HOST_KERNEL_CONFIG=<path to your kernel config> configure-local-kernel
 ```
 
 ```sh

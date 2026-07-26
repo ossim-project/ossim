@@ -1,44 +1,10 @@
-# OSSIM make-system variables:
+# User-facing environment and build configuration is documented in
+# docs/environment.md.
 #
-# Required local build variables:
-#   OSSIM_PREFIX                 Install prefix used by local build rules.
-#   OSSIM_BUILD_DIR              Build directory root.
-#   OSSIM_OUT_DIR                Output/install-staging directory root.
-#
-# Target dispatch variables:
-#   OSSIM_TARGET_LOGIN           SSH login for the target host, e.g. user@host.
-#   OSSIM_TARGET_DIR             Repository path on the target host.
-#   OSSIM_TARGET_SYNC            1 = rsync this workspace before remote target; 0 = skip rsync.
-#   OSSIM_TARGET_RSYNC_ARGS      Args for rsync when OSSIM_TARGET_SYNC=1.
-#   OSSIM_TARGET_SSH_ARGS        SSH args for target execution.
-#   OSSIM_TARGET_TTY_TARGETS     Target-side make goals that should allocate ssh -t.
-#
-# KGDB variables:
-#   OSSIM_TARGET_KGDB_PORT       Target kernel serial port for kgdboc, e.g. ttyS5.
-#   OSSIM_DEV_LOGIN              SSH login for the dev/debug host, e.g. user@host.
-#   OSSIM_DEV_DIR                Repository path on the dev host.
-#   OSSIM_TARGET_DIR             Repository path on the target host.
-#   OSSIM_DEV_KGDB_PORT          Dev-side KGDB serial device, e.g. ttyUSB0.
-#   OSSIM_DEV_KGDB_VMLINUX       Dev-side unstripped vmlinux path for GDB.
-#   OSSIM_KGDB_BAUD              KGDB serial baudrate; must match target kgdboc baud.
-#
-# Kexec variables:
-#   OSSIM_KEXEC_DEFAULT_KERNEL          Installed kernel release for kexec-default-kernel.
-#   OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE  Command line for kexec-default-kernel.
-#   OSSIM_KEXEC_KERNEL_CMDLINE          Command line for kexec-local-kernel; usually
-#                                      $(OSSIM_KEXEC_DEFAULT_KERNEL_CMDLINE) plus
-#                                      OSSIM-specific args such as ossim_cpus=.
-#
-# Kernel trace variables:
-#   OSSIM_TRACEPOINTS             Whitespace-separated subsystem:event list enabled
-#                                 by start-kernl-trace.
-#   OSSIM_TRACEFS                 tracefs mount point; defaults to /sys/kernel/tracing.
-#
-# Target dispatch: `make target-<goal>` runs <goal> on $(OSSIM_TARGET_LOGIN)
-# over SSH. Set OSSIM_TARGET_SYNC=1 to rsync this workspace to
-# $(OSSIM_TARGET_LOGIN):$(OSSIM_TARGET_DIR) before running the target. When
-# OSSIM_TARGET_SYNC=0, the target directory is assumed to already exist and be
-# up to date, e.g. via a shared filesystem.
+# Local targets require OSSIM_PREFIX, OSSIM_BUILD_DIR, and OSSIM_OUT_DIR.
+# `target-<goal>` dispatch and its OSSIM_TARGET_* variables are also documented
+# there. Keep this header concise and update the reference when adding a public
+# configuration variable.
 
 OSSIM_TARGET_MAKE_ARGS ?=
 OSSIM_TARGET_RSYNC_PUSH_ARGS ?= -azv --delete --filter=':- .gitignore'
