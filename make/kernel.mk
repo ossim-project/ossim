@@ -72,7 +72,9 @@ KERNEL_CONFIG_OPTS := \
 	--enable CONFIG_KVM \
 	--enable CONFIG_KVM_INTEL \
 	--enable CONFIG_KVM_AMD \
-	--enable CONFIG_KVM_OSSIM
+	--enable CONFIG_KVM_OSSIM \
+	--enable CONFIG_VHOST \
+	--enable CONFIG_VHOST_OSSIM
 
 KERNEL_DEBUG_CONFIG_OPTS := \
 	--enable CONFIG_OSSIM_DEBUG \
@@ -89,6 +91,7 @@ KERNEL_DEBUG_CONFIG_OPTS := \
 	--enable CONFIG_FRAME_POINTER \
 	--enable CONFIG_KALLSYMS \
 	--enable CONFIG_KALLSYMS_ALL \
+	--enable CONFIG_DYNAMIC_DEBUG \
 	--disable CONFIG_RANDOMIZE_BASE
 
 # Configure kernel from host config with disabled problematic options
