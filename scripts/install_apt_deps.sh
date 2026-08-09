@@ -32,6 +32,7 @@ sudo apt-get update && sudo apt-get install -y \
     clang llvm pkg-config libelf-dev \
     protobuf-compiler libprotobuf-dev libseccomp-dev \
     libgrpc-dev libgrpc++-dev protobuf-compiler-grpc \
+    libyaml-cpp-dev \
     libglib2.0-dev libfdt-dev libpixman-1-dev \
     zlib1g-dev ninja-build \
     guestfish cloud-image-utils \
