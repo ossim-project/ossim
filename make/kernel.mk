@@ -21,6 +21,15 @@ vng_kernel_b := $(vng_kernel_normal_b)
 KERNEL_LOCALVERSION := -ossim
 endif
 
+# The built kernel's release string. Read kbuild's own artifact instead
+# of capturing a `make kernelrelease` submake: the submake's stdout picks
+# up directory/config-regeneration chatter under some invocations
+# (observed on nsl-node12, where the captured "release" contained command
+# output and kexec-local-kernel loaded a nonexistent path), and the file
+# is exactly what that target prints. It exists once the kernel has been
+# built; the cat fails loudly if it has not.
+LOCAL_KERNEL_RELEASE_FILE = $(local_kernel_b)/include/config/kernel.release
+
 # virtme-ng configuration
 VNG_MEM ?= 8G
 VNG_CPUS ?= 8
@@ -62,12 +71,16 @@ OSSIM_TRACEPOINTS ?= \
 # subtract L0 steal from guest cputime, so vtime stays guest-execution-only
 # when the simulation host itself runs on a hypervisor (nested virt). Inert on
 # bare metal.
+# OSSIM depends on NUMA (cell memory placement and per-node reservation
+# accounting); enable it explicitly so olddefconfig cannot silently drop
+# OSSIM from a base config without it.
 KERNEL_CONFIG_OPTS := \
 	--disable CONFIG_LOCALVERSION_AUTO \
 	--set-str CONFIG_LOCALVERSION "$(KERNEL_LOCALVERSION)" \
 	--disable CONFIG_TICK_CPU_ACCOUNTING \
 	--enable CONFIG_VIRT_CPU_ACCOUNTING_GEN \
 	--enable CONFIG_PARAVIRT_TIME_ACCOUNTING \
+	--enable CONFIG_NUMA \
 	--enable CONFIG_OSSIM \
 	--enable CONFIG_KVM \
 	--enable CONFIG_KVM_INTEL \
@@ -157,7 +170,7 @@ local-kernel-all: $(local_kernel_b)/.config
 
 .PHONY: install-local-kernel
 install-local-kernel: local-kernel
-	KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+	KERNEL_RELEASE=$$(cat $(LOCAL_KERNEL_RELEASE_FILE)) && \
 		sudo install -m 0644 $(local_kernel_b)/arch/x86/boot/bzImage "$(BOOT_DIR)/vmlinuz-$$KERNEL_RELEASE"
 
 .PHONY: install-local-kernel-all
@@ -168,7 +181,7 @@ install-local-kernel-all: local-kernel-all
 # Boot the installed local kernel via kexec
 .PHONY: kexec-local-kernel
 kexec-local-kernel:
-	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+	@KERNEL_RELEASE=$$(cat $(LOCAL_KERNEL_RELEASE_FILE)) && \
 		$(MAKE) KERNEL_RELEASE="$$KERNEL_RELEASE" \
 			KERNEL_CMDLINE="$(OSSIM_KEXEC_KERNEL_CMDLINE)" \
 			kexec-kernel
@@ -202,7 +215,7 @@ kexec-local-kernel-kgdb: rsync-local-vmlinux
 ifeq ($(strip $(OSSIM_TARGET_KGDB_PORT)),)
 	$(error OSSIM_TARGET_KGDB_PORT is not defined! Pass it like: make kexec-local-kernel-kgdb OSSIM_TARGET_KGDB_PORT=ttyS5)
 endif
-	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+	@KERNEL_RELEASE=$$(cat $(LOCAL_KERNEL_RELEASE_FILE)) && \
 		$(MAKE) KERNEL_RELEASE="$$KERNEL_RELEASE" \
 			KERNEL_CMDLINE="$(OSSIM_KEXEC_KERNEL_CMDLINE) console=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdboc=$(OSSIM_TARGET_KGDB_PORT),$(OSSIM_KGDB_BAUD) kgdbwait" \
 			kexec-kernel
@@ -234,7 +247,7 @@ endif
 ifeq ($(strip $(OSSIM_DEV_KGDB_VMLINUX)),)
 	$(error OSSIM_DEV_KGDB_VMLINUX is not defined! Pass it like: make rsync-local-vmlinux OSSIM_DEV_KGDB_VMLINUX=/path/to/vmlinux)
 endif
-	@KERNEL_RELEASE=$$($(MAKE) -s -C $(local_kernel_b) kernelrelease) && \
+	@KERNEL_RELEASE=$$(cat $(LOCAL_KERNEL_RELEASE_FILE)) && \
 		VMLINUX_SRC="$(local_kernel_b)/vmlinux" && \
 		if [ ! -f "$$VMLINUX_SRC" ]; then \
 			echo "Error: $$VMLINUX_SRC not found! Please build the kernel first." >&2; \
