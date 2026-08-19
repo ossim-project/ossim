@@ -29,7 +29,7 @@ sudo apt-get update && sudo apt-get install -y \
     ${KERNEL_DEPS[@]} \
     ${MISC_DEPS[@]} \
     cmake \
-    clang llvm pkg-config libelf-dev \
+    clang llvm pkg-config libelf-dev libbpf-dev \
     protobuf-compiler libprotobuf-dev libseccomp-dev \
     libgrpc-dev libgrpc++-dev protobuf-compiler-grpc \
     libyaml-cpp-dev \
