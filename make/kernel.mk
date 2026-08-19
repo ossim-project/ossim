@@ -83,6 +83,7 @@ KERNEL_CONFIG_OPTS := \
 	--enable CONFIG_NUMA \
 	--enable CONFIG_BPF_SYSCALL \
 	--enable CONFIG_OSSIM \
+	--enable CONFIG_OSSIM_DIST \
 	--enable CONFIG_KVM \
 	--enable CONFIG_KVM_INTEL \
 	--enable CONFIG_KVM_AMD \
