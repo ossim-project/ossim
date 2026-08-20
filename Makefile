@@ -100,5 +100,6 @@ clean:
 include make/qemu.mk
 include make/kernel.mk
 include make/libossim.mk
+include make/ns3.mk
 
 endif
