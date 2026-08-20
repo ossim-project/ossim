@@ -10,3 +10,7 @@
 [submodule "libossim"]
 	path = libossim
 	url = https://github.com/ossim-project/libossim.git
+[submodule "ns-3"]
+	path = ns-3
+	url = https://github.com/ossim-project/ns-3.git
+	branch = ns-3.48
