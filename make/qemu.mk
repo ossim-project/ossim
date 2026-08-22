@@ -13,7 +13,8 @@ configure-qemu: install-libossim update-qemu-kernel-headers
 	cd $(qemu_b) && $(abspath $(qemu_d)configure) \
 		--prefix=$(abspath $(PREFIX)) \
 		--target-list=x86_64-softmmu \
-		--extra-cflags=-Wno-error=discarded-qualifiers \
+		--extra-cflags="-I$(PREFIX)/include" \
+		--extra-ldflags="-L$(PREFIX)/lib" \
 		--enable-numa \
 		--enable-slirp \
 		--enable-kvm \
