@@ -1,4 +1,4 @@
-# Ossim: Operating Support for Live Simulation
+# Ossim: Operating Support for Cluster-Scale Full-Stack Simulation
 
 Ossim is an OS-level approach to cluster-scale full-stack simulation built on
 the Linux virtualization stack. It combines full-stack fidelity for unmodified
@@ -18,6 +18,32 @@ The current development and test environment is:
 Other Linux distributions and Ubuntu releases may work, but are not currently
 tested.
 
+### Get the sources
+
+**Source release:** extract the release tarball and enter its directory. Replace
+`ossim-0123456` with the name of your archive, without the `.tar.gz` suffix:
+
+```sh
+tar -xzf ossim-0123456.tar.gz
+cd ossim-0123456
+```
+
+The release includes `kernel/`, `libossim/`, `qemu/`, `ns-3/`, `workloads/`, and
+their nested submodule sources. It contains no Git metadata, so skip the steps
+marked **Git checkouts only** below. The dependency installation, environment
+setup, and build commands apply to both source releases and Git checkouts.
+
+**Git checkout:** clone the repository and enter it:
+
+```sh
+git clone https://github.com/ossim-project/ossim.git
+cd ossim
+```
+
+Initialize the components you need using the submodule commands below.
+Run the following setup and build commands from the source root: the directory
+you just extracted or cloned.
+
 ### Quick start: kernel smoke test
 
 The shortest test path builds the Ossim kernel and boots it with virtme-ng. It
@@ -30,7 +56,7 @@ bash scripts/install_apt_deps.sh
 sudo adduser "$USER" kvm
 ```
 
-Log out and back in after changing group membership. Then, from the repository
+Log out and back in after changing group membership. Then, from the source
 root, choose writable locations for the install, build, and output trees. These
 generic values are suitable for a disposable local build and may be changed:
 
@@ -45,8 +71,18 @@ export LIBRARY_PATH="$OSSIM_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export CPATH="$OSSIM_PREFIX/include${CPATH:+:$CPATH}"
 export PKG_CONFIG_PATH="$OSSIM_PREFIX/lib/pkgconfig:$OSSIM_PREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export CMAKE_PREFIX_PATH="$OSSIM_PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+```
 
+**Git checkouts only:** initialize the kernel sources. Source releases already
+include them.
+
+```sh
 git submodule update --init --recursive --depth 1 kernel
+```
+
+Build and run the kernel smoke test:
+
+```sh
 make configure-vng-kernel
 make vng-kernel
 make VNG_CMD="uname -r" exec-vng
@@ -102,9 +138,44 @@ test -r /dev/kvm && test -w /dev/kvm
 vng --version
 ```
 
+## Source release
+
+The following packaging commands require a Git checkout. If you are building
+from an existing source release, follow [Setup](#setup) and skip this section.
+
+From a Git checkout, create a source tarball containing the current committed
+`HEAD` and all nested submodules at their recorded commits:
+
+```sh
+make release
+```
+
+This writes `../ossim-<short-commit>.tar.gz` and prints its SHA-256 checksum.
+Packaging requires a clean worktree, including initialized submodules: staged,
+modified, and untracked files block it; Git-ignored files do not. It uses a
+temporary clone with history limited to depth 1 for the main repository and all
+nested submodules. After the cleanliness check, missing submodules in the current
+checkout are initialized recursively with depth 1 from their configured URLs.
+The release is then assembled from shallow clones of local Git repositories.
+When packaging an older revision, its pinned submodule commits must also be
+available locally. Git metadata is excluded. No build environment variables are
+required.
+
+To package a specific tag or commit and choose an output directory:
+
+```sh
+make release OSSIM_RELEASE_REF=v0.1.0 OSSIM_RELEASE_DIR=/path/to/releases
+```
+
+The script can also be run directly as
+`bash scripts/make_release.sh [ref [output-directory]]`.
+
 ## Ossim Kernel
 
-`kernel/` contains the Ossim custom Linux kernel. Initialize the submodule first:
+`kernel/` contains the Ossim custom Linux kernel and is included in source
+releases.
+
+**Git checkouts only:** initialize the kernel submodule first:
 
 ```sh
 git submodule update --init --recursive --depth 1 kernel
@@ -260,7 +331,7 @@ instead of the development host:
 
 ```sh
 export OSSIM_TARGET_LOGIN=<user@host>
-export OSSIM_TARGET_DIR=<repo-path-on-target>
+export OSSIM_TARGET_DIR=<source-path-on-target>
 export OSSIM_TARGET_SYNC=1   # set to 0 if the target tree is already up to date
 
 # Configure/build/install on the target host
@@ -280,11 +351,15 @@ make target-kexec-local-kernel OSSIM_KEXEC_KERNEL_CMDLINE="ossim_cpus=4-7"
 - **ossimd**: User-space daemon that orchestrates the Ossim system
 - **ossimctl**: Command-line interface to communicate with ossimd
 
-To build and install:
+**Git checkouts only:** initialize the library sources first:
 
 ```sh
 git submodule update --init --recursive libossim
+```
 
+For both source releases and Git checkouts, build and install:
+
+```sh
 # Build all components
 make libossim
 
@@ -297,11 +372,17 @@ ossimctl --help
 
 ## QEMU with Ossim Integration
 
-`qemu/` contains a fork of QEMU with Ossim integration. We need to build it from source and install to `$OSSIM_PREFIX`:
+`qemu/` contains a fork of QEMU with Ossim integration.
+
+**Git checkouts only:** initialize the QEMU sources first:
 
 ```sh
 git submodule update --init --recursive qemu
+```
 
+For both source releases and Git checkouts, build and install to `$OSSIM_PREFIX`:
+
+```sh
 # Configure QEMU with Ossim default configuration
 make configure-qemu
 
@@ -312,7 +393,9 @@ make install-qemu
 
 ## Run example workloads
 
-Initialize the workloads submodule:
+Source releases already include `workloads/`.
+
+**Git checkouts only:** initialize the workloads submodule:
 
 ```sh
 git submodule update --init --recursive workloads

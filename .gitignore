@@ -1,5 +1,6 @@
 /install/
 /build/
 /out/
+ossim-*.tar.gz
 
 **/__pycache__/

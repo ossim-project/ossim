@@ -11,7 +11,8 @@ No host-specific paths are assumed by this document.
 
 ## Required local-build variables
 
-The top-level Makefile requires all three variables for local targets:
+The top-level Makefile requires all three variables for local build targets.
+The `release` target does not require them:
 
 | Variable | Purpose |
 | --- | --- |
@@ -120,3 +121,22 @@ make HOST_KERNEL_CONFIG=/boot/config-<kernel-release> configure-local-kernel
 The Makefiles remain authoritative for defaults and target behavior. This file
 is the user-facing index of supported configuration knobs; update both when a
 variable's behavior changes.
+
+## Source release
+
+`make release` creates a source tarball with all nested submodules at their
+recorded commits. It requires a clean worktree, including initialized
+submodules: staged, modified, and untracked files block packaging; Git-ignored
+files do not. It uses a temporary clone with history limited to depth 1 for the
+main repository and all nested submodules, and excludes Git metadata. After the
+cleanliness check, missing submodules in the current checkout are initialized
+recursively with depth 1 from their configured URLs. Release clones and any
+subsequent fetches use local Git repositories only. When packaging an older
+revision, its pinned submodule commits must also be available locally.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OSSIM_RELEASE_REF` | `HEAD` | Commit, tag, or revision to package |
+| `OSSIM_RELEASE_DIR` | `..` | Output directory, relative to the directory where make runs |
+
+The archive is named `ossim-<short-commit>.tar.gz`; the script prints its SHA-256
