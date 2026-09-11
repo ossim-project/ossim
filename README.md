@@ -1,25 +1,9 @@
-# Ossim: OS-Driven Live Simulation for Cluster-Scale Full-Stack Evaluation
+# Ossim: Operating Support for Live Simulation
 
 Ossim is an OS-level approach to cluster-scale full-stack simulation built on
 the Linux virtualization stack. It combines full-stack fidelity for unmodified
 production software with the simulation performance needed for iterative
 configuration exploration.
-
-Ossim coordinates live and modeled components under shared simulated time while
-controlling interference among co-located live hosts. Its design comprises four
-subsystems:
-
-- **Simulation-oriented scheduling** coordinates live and modeled components
-  under shared virtual time.
-- **Live memory hierarchy management** controls interference among co-located
-  live components.
-- **Simulation-aware IPC** delivers cross-component events under virtual time.
-- **Distributed simulation orchestration** composes the per-host mechanisms
-  across machines for cluster-scale simulation.
-
-Together, these mechanisms explore *simulation-native OS support*, where
-simulation control and orchestration become core operating-system
-responsibilities.
 
 ## Setup
 
@@ -27,7 +11,7 @@ responsibilities.
 
 The current development and test environment is:
 
-- Ubuntu 26.04 LTS
+- Ubuntu 24.04/26.04 LTS
 - x86-64 with hardware virtualization enabled and `/dev/kvm` available
 - a user account that can run `sudo`
 
@@ -335,3 +319,21 @@ git submodule update --init --recursive workloads
 ```
 
 Refer to the instructions in `workloads/README.md` to run the example workloads.
+
+## License
+
+Copyright 2026 The Ossim Project.
+
+Files maintained directly in this superproject are licensed under the Apache
+License, Version 2.0. See [LICENSE](LICENSE). Each Git submodule is a separate
+project distributed under its own license; the superproject license does not
+relicense submodule content.
+
+| Component | Path | License |
+| --- | --- | --- |
+| Ossim superproject | `.` | [Apache-2.0](LICENSE) |
+| Linux kernel | `kernel/` | [GPL-2.0-only overall, with file-specific licenses and exceptions](kernel/COPYING) |
+| libossim | `libossim/` | [Apache-2.0](libossim/LICENSE) |
+| QEMU | `qemu/` | [GPL version 2 overall, with file-specific compatible licenses](qemu/LICENSE) |
+| ns-3 | `ns-3/` | [Predominantly GPL-2.0-only, with file-specific compatible licenses](ns-3/LICENSE) |
+| Workloads | `workloads/` | [GPL-2.0-only](workloads/LICENSE) |

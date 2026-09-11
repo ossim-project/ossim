@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Yiliang Wan
+# SPDX-License-Identifier: Apache-2.0
+
 import argparse
 import os
 import subprocess
