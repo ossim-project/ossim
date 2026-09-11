@@ -1,7 +1,8 @@
 # User-facing environment and build configuration is documented in
 # docs/environment.md.
 #
-# Local targets require OSSIM_PREFIX, OSSIM_BUILD_DIR, and OSSIM_OUT_DIR.
+# Local build targets require OSSIM_PREFIX, OSSIM_BUILD_DIR, and OSSIM_OUT_DIR.
+# The release target works without build configuration.
 # `target-<goal>` dispatch and its OSSIM_TARGET_* variables are also documented
 # there. Keep this header concise and update the reference when adding a public
 # configuration variable.
@@ -61,7 +62,8 @@ target-%: target-push
 	ssh $$ssh_args $(OSSIM_TARGET_LOGIN) 'cd $(OSSIM_TARGET_DIR) && make $* $(OSSIM_TARGET_FORWARD_ARGS)'
 .PHONY: target-%
 
-else  # local build — require ossim env vars and load build rules
+else ifneq ($(filter-out release,$(or $(MAKECMDGOALS),all)),)
+# Local builds require ossim env vars; release alone skips the build rules.
 
 ifeq ($(OSSIM_PREFIX),)
 $(error OSSIM_PREFIX is not set)
@@ -103,3 +105,10 @@ include make/libossim.mk
 include make/ns3.mk
 
 endif
+
+OSSIM_RELEASE_REF ?= HEAD
+OSSIM_RELEASE_DIR ?= ..
+
+release:
+	bash scripts/make_release.sh "$(OSSIM_RELEASE_REF)" "$(OSSIM_RELEASE_DIR)"
+.PHONY: release
