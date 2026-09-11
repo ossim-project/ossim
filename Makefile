@@ -7,7 +7,7 @@
 # configuration variable.
 
 OSSIM_TARGET_MAKE_ARGS ?=
-OSSIM_TARGET_RSYNC_PUSH_ARGS ?= -azv --delete --filter=':- .gitignore'
+OSSIM_TARGET_RSYNC_PUSH_ARGS ?= -azv --delete --exclude='.git/' --filter=':- .gitignore'
 OSSIM_TARGET_SSH_ARGS ?=
 OSSIM_TARGET_TTY_TARGETS ?= run-vng run-vng-gdb run-vng-gdb-paused gdb-vng kgdb-kernel kgdb-remote-kernel kexec-local-kernel-kgdb test-kernel ssh-vng
 OSSIM_TARGET_FORWARD_ARGS := $(filter-out OSSIM_TARGET_%,$(MAKEOVERRIDES))
